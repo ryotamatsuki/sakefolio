@@ -141,9 +141,10 @@ export async function loadRecords(token: string, storage: StorageInfo): Promise<
   if (!rows.length) return [];
   const headers = rows[0];
   const records = rows.slice(1).filter(row => row[0]);
-  return records.map(row => Object.fromEntries(
-    TABLE_HEADERS.Reviews.map(field => [field, String(row[headers.indexOf(field)] || '')])
-  ) as unknown as RecordEntry).map(item=>({...item,notes: String(records.find(row=>row[0]===item.reviewId)?.[headers.indexOf('comment')] || '')})).sort((a,b) => b.drinkingDate.localeCompare(a.drinkingDate));
+  return records.map(row => ({
+    ...(Object.fromEntries(TABLE_HEADERS.Reviews.map(field => [field, String(row[headers.indexOf(field)] || '')])) as unknown as RecordEntry),
+    notes: String(row[headers.indexOf('comment')] || '')
+  })).sort((a,b) => b.drinkingDate.localeCompare(a.drinkingDate));
 }
 export async function loadManualBrands(token: string, storage: StorageInfo): Promise<Brand[]> {
   const rows = await getRows(token,storage.spreadsheetId,'Brands','A1:L');
