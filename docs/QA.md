@@ -51,3 +51,24 @@
 ブラウザでのPNGファイル選択は、iPhoneカメラ撮影の検証を意味しない。
 家族用の分離を未検証のまま完成扱いにしない。AI画像解析は未実装。
 テスト画像のDrive上の実ファイル削除は未確認（レコードは削除確認済み）。
+
+
+## Stage 2（Vivino基本5機能）— 2026-10-15
+
+### データ層の実装完了
+- [x] Google SheetsにWishlistタブ8列を追加（既存6+説明タブを維持）
+- [x] Wishlist.status（飲みたい / 保留 / 飲んだ）とpriority（高 / 中 / 低）に選択制約設定
+- [x] 既存Reviews、Photos、Brandsのレコードを削除・置換せず追加
+- [x] 「UX改修Stage2」タブにAppSheet適用値と状態を記録
+- [x] docs/VIVINO_CORE_UX_STAGE2.md に5機能分のビュー/仮想列/アクション/スライス仕様を作成
+
+### AppSheetエディタ未適用・未検証
+- [ ] AppSheetへWishlistテーブル追加とKey/Ref/Enum型設定
+- [ ] Reviews.coverImage仮想Image列設定・写真カード表示の実機確認
+- [ ] Brands詳細の列順、レビュー一覧、アクション配置確認
+- [ ] Reviews「もう一度飲む」アクションと簡略化フォームの確認
+- [ ] Wishlist登録アクション、重複防止、WishlistActiveビューの操作確認
+- [ ] Brandsの銘柄/酒蔵/県名検索と高評価/産地別フィルター
+- [ ] 初期レビュー・写真の保存性と別アカウントコピーの回帰試験
+
+**判定**: Google Sheetsデータ構造とAppSheet実装仕様の更新は実施済み。AppSheet画面自体の更新と5機能の動作は未完了。外部APIを使ったAI認識は対象外。
