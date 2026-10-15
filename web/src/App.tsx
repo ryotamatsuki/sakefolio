@@ -260,7 +260,7 @@ export default function App() {
           <select aria-label="都道府県の絞り込み" value={filterPrefecture} onChange={e=>setFilterPrefecture(e.target.value)}>
             <option value="">すべての都道府県</option>{PREFECTURES.map(p=><option key={p} value={p}>{p}</option>)}
           </select></div>
-        <div className="results-note">表示 {filteredBrands.length} 件（最大48件） / さけのわ3,303銘柄＋自分の追加分</div>
+        <div className="results-note">表示 {filteredBrands.length} 件（最大48件） / <a href="https://sakenowa.com" target="_blank" rel="noopener noreferrer">さけのわデータ</a>を利用しています（3,303銘柄）＋自分の追加分</div>
         <div className="explore-grid">
           {filteredBrands.map(b=><button className="brand-tile" type="button" key={b.brandId} onClick={()=>setSelectedBrand(b)}>
             <div className="brand-tile-icon"><Wine size={24} strokeWidth={1.35}/></div><div className="brand-tile-info">
