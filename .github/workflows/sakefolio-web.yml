@@ -7,7 +7,7 @@ on:
       - "web/**"
       - ".github/workflows/sakefolio-web.yml"
   pull_request:
-    branches: [main]
+    branches: [main, feat/appsheet-mvp-stage1]
     paths:
       - "web/**"
       - ".github/workflows/sakefolio-web.yml"
