@@ -41,10 +41,9 @@ export async function verifyPhoto(file: File): Promise<VerifiedPhoto> {
 }
 export function validateRecordInput(data: {
   brandName:string;breweryName:string;drinkingDate:string;rating:string;
-  [key:string]:string
 }): void {
   if (!data.brandName.trim() || !data.breweryName.trim()) throw new Error('酒蔵名と銘柄名を入力してください。');
-  for (const [field,value] of Object.entries(data)) {
+  for (const [field,value] of Object.entries(data as Record<string,string>)) {
     if (typeof value !== 'string') throw new Error('記録形式が不正です。');
     if (value.length > MAX_TEXT_LENGTH) throw new Error(field+'が長すぎます（最大4000文字）。');
     if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(value)) throw new Error('入力に利用できない制御文字が含まれています。');
