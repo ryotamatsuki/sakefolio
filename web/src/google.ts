@@ -70,7 +70,7 @@ async function findFile(token: string, name: string, parentId?: string, mimeType
     mimeType ? "mimeType = '" + safe(mimeType) + "'" : ''
   ].filter(Boolean).join(' and ');
   const url = 'https://www.googleapis.com/drive/v3/files?' + new URLSearchParams({
-    q, fields: 'nextPageToken,files(id,name,mimeType)', page_size: '100'
+    q, fields: 'nextPageToken,files(id,name,mimeType)', pageSize: '100'
   }).toString();
   const result = await api<{files: DriveFile[]}>(token, url);
   return result.files?.[0];
@@ -143,7 +143,7 @@ export async function loadRecords(token: string, storage: StorageInfo): Promise<
   const records = rows.slice(1).filter(row => row[0]);
   return records.map(row => Object.fromEntries(
     TABLE_HEADERS.Reviews.map(field => [field, String(row[headers.indexOf(field)] || '')])
-  ) as unknown as RecordEntry).sort((a,b) => b.drinkingDate.localeCompare(a.drinkingDate));
+  ) as unknown as RecordEntry).map(item=>({...item,notes: String(records.find(row=>row[0]===item.reviewId)?.[headers.indexOf('comment')] || '')})).sort((a,b) => b.drinkingDate.localeCompare(a.drinkingDate));
 }
 export async function loadManualBrands(token: string, storage: StorageInfo): Promise<Brand[]> {
   const rows = await getRows(token,storage.spreadsheetId,'Brands','A1:L');
@@ -201,8 +201,18 @@ export async function saveRecord(
       breweryAddress:entry.breweryAddress,source:'manual',createdAt:now,updatedAt:now
     });
   }
-  const bottleId = crypto.randomUUID();
-  await appendRow(token,storage.spreadsheetId,'Bottles',{
+  const bottleRows = await getRows(token,storage.spreadsheetId,'Bottles','A1:O');
+  const bottleHeader = bottleRows[0] || [];
+  const matches = bottleRows.slice(1).find(r =>
+    r[bottleHeader.indexOf('brandId')] === brandId &&
+    r[bottleHeader.indexOf('productName')] === (entry.productName || entry.brandName) &&
+    r[bottleHeader.indexOf('sakeType')] === entry.sakeType &&
+    r[bottleHeader.indexOf('sakeTypeOther')] === entry.sakeTypeOther &&
+    r[bottleHeader.indexOf('processingStyle')] === entry.processingStyles &&
+    r[bottleHeader.indexOf('heatTreatment')] === entry.heatTreatment
+  );
+  const bottleId = matches?.[bottleHeader.indexOf('bottleId')] || crypto.randomUUID();
+  if (!matches) await appendRow(token,storage.spreadsheetId,'Bottles',{
     bottleId,brandId,productName:entry.productName || entry.brandName,
     sakeType:entry.sakeType,sakeTypeOther:entry.sakeTypeOther,
     processingStyle:entry.processingStyles,brewingMethod:entry.brewingMethod,
@@ -216,6 +226,6 @@ export async function saveRecord(
     photoId:crypto.randomUUID(),reviewId,imageFile:photoId,photoType:'表ラベル',capturedAt:now,aiStatus:'未解析'
   });
   await appendRow(token,storage.spreadsheetId,'Reviews',{
-    ...entry,reviewId,brandId,bottleId,photoId,createdAt:now,updatedAt:now
+    ...entry,reviewId,brandId,bottleId,photoId,comment:entry.notes,createdAt:now,updatedAt:now
   });
 }
