@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
   ArrowRight, BookOpen, Camera, Check, ChevronDown, Compass,
@@ -6,6 +6,7 @@ import {
   Plus, Search, ShieldCheck, Star, Wine, X
 } from 'lucide-react';
 import type { Brand, RecordEntry, StorageInfo } from './types';
+import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord } from './google';
 
@@ -59,19 +60,34 @@ export default function App() {
   const [preview, setPreview] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Invalidates outstanding requests before a disconnect or another connection.
+  const session = useRef(0);
+  const operation = useRef(false);
   const brands = useMemo(() => [...manualBrands, ...catalog], [manualBrands, catalog]);
 
   useEffect(() => {
     loadBrands().then(setCatalog).catch(err => setMessage(String(err.message || err)));
   }, []);
   useEffect(() => {
-    if (!photo) { setPreview(''); return; }
-    const url = URL.createObjectURL(photo);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
+    let active = true;
+    let url = '';
+    setPreview('');
+    if (photo) createPhotoPreview(photo).then(blob => {
+      if (!active) return;
+      url = URL.createObjectURL(blob);
+      setPreview(url);
+    }).catch(() => {
+      if (active) setMessage('写真のプレビューを作成できません。画像形式・サイズを確認してください。');
+    });
+    return () => { active = false; if (url) URL.revokeObjectURL(url); };
   }, [photo]);
 
   const connect = async () => {
+    if (operation.current) return;
+    operation.current = true;
+    const current = ++session.current;
+    setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
+    setPhoto(null);setEntry(emptyEntry());
     setBusy(true); setMessage('');
     try {
       const accessToken = await requestGoogleAccess();
@@ -80,14 +96,17 @@ export default function App() {
       const [saved, added] = await Promise.all([
         loadRecords(accessToken, myStorage),loadManualBrands(accessToken,myStorage)
       ]);
+      if (session.current !== current) return;
       setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);
       setAccountEmail(account.emailAddress);
       setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。');
     } catch (error) {
+      if (session.current !== current) return;
       setMessage(error instanceof Error ? error.message : '接続に失敗しました。');
-    } finally { setBusy(false); }
+    } finally { operation.current = false; setBusy(false); }
   };
   const disconnect = () => {
+    ++session.current;
     if (token) revokeAccess(token);
     setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
     setPhoto(null);setEntry(emptyEntry());setMessage('接続を解除しました。');setMenuOpen(false);
@@ -101,6 +120,7 @@ export default function App() {
   };
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (operation.current) return;
     if (!token || !storage) { setMessage('保存するには先にGoogle Driveへ接続してください。'); return; }
     if (!entry.breweryName.trim() || !entry.brandName.trim() || !entry.drinkingDate || !entry.rating) {
       setMessage('酒蔵、銘柄、飲んだ日、評価を入力してください。');return;
@@ -108,17 +128,22 @@ export default function App() {
     if (entry.sakeType === 'その他（自由記入）' && !entry.sakeTypeOther.trim()) {
       setMessage('「その他」を選んだ場合は種類名を記入してください。');return;
     }
+    operation.current = true;
+    const current = session.current;
     setBusy(true);setMessage('');
     try {
       await saveRecord(token,storage,entry,brands,photo);
+      if (session.current !== current) return;
       const [saved, added] = await Promise.all([loadRecords(token,storage),loadManualBrands(token,storage)]);
+      if (session.current !== current) return;
       setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);
       setShowAdvanced(false);setTab('home');
       setMessage('記録を保存しました。Google SheetsとDriveで確認できます。');
       window.scrollTo({top:0,behavior:'smooth'});
     } catch (error) {
+      if (session.current !== current) return;
       setMessage(error instanceof Error ? error.message : '記録の保存に失敗しました。');
-    } finally {setBusy(false);}
+    } finally {operation.current = false;setBusy(false);}
   };
   const filteredBrands = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('ja');

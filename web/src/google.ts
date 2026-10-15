@@ -47,6 +47,7 @@ export async function requestGoogleAccess(): Promise<string> {
     const client = window.google!.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: GOOGLE_SCOPE,
+      include_granted_scopes: false,
       callback: (response: TokenResponse) => {
         if (settled) return;
         settled = true;
@@ -229,6 +230,12 @@ export async function saveRecord(
 ): Promise<void> {
   validateRecordInput(entry);
   if (photo) await verifyPhoto(photo); // Before creating any rows or uploading data.
+  // Recheck on every save: the owner may edit Sheets after connecting.
+  for (const table of ['Brands','Bottles','Reviews','Photos']) {
+    const current = (await getRows(token,storage.spreadsheetId,table,'A1:AZ1'))[0] || [];
+    if (TABLE_HEADERS[table].some((name,index) => current[index] !== name))
+      throw new Error('保存先の「'+table+'」の列構造が変わっています。データ保護のため書き込みを中止しました。');
+  }
   const now = new Date().toISOString();
   let brandId = entry.brandId;
   if (!brandId) {

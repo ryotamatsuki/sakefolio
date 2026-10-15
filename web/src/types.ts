@@ -34,7 +34,7 @@ export interface TokenResponse { access_token?: string; error?: string; error_de
 declare global {
   interface Window {
     google?: { accounts: { oauth2: {
-      initTokenClient: (options: { client_id: string; scope: string; callback: (response: TokenResponse) => void; error_callback?: (error: unknown) => void; }) => { requestAccessToken: (options?: { prompt?: string }) => void };
+      initTokenClient: (options: { client_id: string; scope: string; include_granted_scopes?: boolean; callback: (response: TokenResponse) => void; error_callback?: (error: unknown) => void; }) => { requestAccessToken: (options?: { prompt?: string }) => void };
       revoke: (token: string, callback: () => void) => void;
     } } };
   }
