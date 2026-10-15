@@ -75,9 +75,8 @@ export async function getDriveAccount(token: string): Promise<DriveAccount> {
 async function findFile(token: string, name: string, parentId: string, mimeType: string, kind: FileKind): Promise<DriveFile | undefined> {
   const safe = (x: string) => x.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const q = [
-    "name = '" + safe(name) + "'",
     "trashed = false",
-    "'" + safe(parentId) + "' in parents",
+    ...(parentId ? ["'" + safe(parentId) + "' in parents"] : []),
     "mimeType = '" + safe(mimeType) + "'",
     "appProperties has { key='sakefolioApp' and value='" + APP_MARKER + "' }",
     "appProperties has { key='sakefolioKind' and value='" + kind + "' }"
@@ -86,7 +85,7 @@ async function findFile(token: string, name: string, parentId: string, mimeType:
     q, fields: 'nextPageToken,files(id,name,mimeType)', pageSize: '100'
   }).toString();
   const result = await api<{files: DriveFile[]}>(token, url);
-  if ((result.files?.length || 0) > 1) throw new Error('同じ役割のSakefolio保存先が複数あります。自動的に選ばず、管理者が確認してください。');
+  if ((result.files?.length || 0) > 1) throw new Error('同じ役割のSakefolio保存先（'+name+'）が複数あります。自動的に選ばず、管理者が確認してください。');
   return result.files?.[0];
 }
 async function createFile(token: string, metadata: Record<string, unknown>): Promise<DriveFile> {
@@ -124,7 +123,7 @@ async function initializeSpreadsheet(token: string, id: string): Promise<void> {
 export async function ensureStorage(token: string): Promise<StorageInfo> {
   const folderMime = 'application/vnd.google-apps.folder';
   const sheetMime = 'application/vnd.google-apps.spreadsheet';
-  let folder = await findFile(token, 'Sakefolio', 'root', folderMime, 'root');
+  let folder = await findFile(token, 'Sakefolio', '', folderMime, 'root');
   if (!folder) folder = await createFile(token,{name:'Sakefolio',mimeType:folderMime,...metadata('root')});
   let photos = await findFile(token,'Photos',folder.id,folderMime,'photos-folder');
   if (!photos) photos = await createFile(token,{name:'Photos',mimeType:folderMime,parents:[folder.id],...metadata('photos-folder')});
