@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import {
-  ArrowLeft, ArrowRight, BookOpen, Camera, Check, ChevronDown, Compass,
-  ExternalLink, FolderHeart, Heart, Leaf, LogIn, LogOut, MapPin, Menu,
-  Plus, Search, ShieldCheck, Sparkles, Star, Wine, X
+  ArrowRight, BookOpen, Camera, Check, ChevronDown, Compass,
+  ExternalLink, FolderHeart, Leaf, LogIn, LogOut, MapPin,
+  Plus, Search, ShieldCheck, Star, Wine, X
 } from 'lucide-react';
 import type { Brand, RecordEntry, StorageInfo } from './types';
 import { breweryMapsUrl, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
@@ -38,7 +39,7 @@ function Photo({ token, photoId, alt }: { token: string; photoId: string; alt: s
   }, [token, photoId]);
   return url ? <img className="record-photo" src={url} alt={alt} loading="lazy" /> : <div className="photo-fallback"><Wine size={30} strokeWidth={1.3}/></div>;
 }
-function SectionEyebrow({ children }: { children: React.ReactNode }) {
+function SectionEyebrow({ children }: { children: ReactNode }) {
   return <div className="eyebrow"><span className="eyebrow-line"/>{children}</div>;
 }
 export default function App() {
@@ -95,7 +96,7 @@ export default function App() {
       municipality:'',breweryAddress:''}));
     setTab('record');setSearch('');window.scrollTo({top:0,behavior:'smooth'});
   };
-  const save = async (event: React.FormEvent<HTMLFormElement>) => {
+  const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!token || !storage) { setMessage('保存するには先にGoogle Driveへ接続してください。'); return; }
     if (!entry.breweryName.trim() || !entry.brandName.trim() || !entry.drinkingDate || !entry.rating) {
@@ -283,9 +284,9 @@ export default function App() {
                 <button type="button" onClick={()=>goto('explore')}>銘柄を探す <ArrowRight size={14}/></button></div>
               <div className="field-grid two">
                 <label>酒蔵名 <span className="required">必須</span>
-                  <input required value={entry.breweryName} onChange={e=>update('breweryName',e.target.value)} placeholder="例：石鎚酒造"/></label>
+                  <input required value={entry.breweryName} onChange={e=>setEntry(v=>({...v,breweryName:e.target.value,brandId:''}))} placeholder="例：石鎚酒造"/></label>
                 <label>銘柄名 <span className="required">必須</span>
-                  <input required value={entry.brandName} onChange={e=>{update('brandName',e.target.value);setEntry(v=>({...v,brandName:e.target.value,brandId:''}));}} placeholder="例：石鎚"/></label>
+                  <input required value={entry.brandName} onChange={e=>setEntry(v=>({...v,brandName:e.target.value,brandId:''}))} placeholder="例：石鎚"/></label>
               </div>
               <div className="field-grid two">
                 <label>都道府県 <select value={entry.prefecture} onChange={e=>update('prefecture',e.target.value)}>
