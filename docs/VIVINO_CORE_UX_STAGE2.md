@@ -1,6 +1,6 @@
 # Sakefolio Stage 2: Vivino-style core UX implementation
 
-更新: 2026-10-15。**AppSheetのビュー/列/アクションは、この文書の設定をAppSheetエディタへ適用する必要がある。** GitHubやSheetsの更新だけでAppSheetの画面は変わらない。実AppSheet App ID: `280ba1b7-078b-45f1-a39b-c7dea2152da9`。
+更新: 2026-10-15。**AppSheet本体へ適用済み。ブラウザで5機能の基本動作とGoogle Sheetsへの保存を検証。** iPhone実機と別アカウントへのコピーは未検証。詳細は [QA.md](QA.md) を参照。実AppSheet App ID: `280ba1b7-078b-45f1-a39b-c7dea2152da9`。
 
 既存データ・写真を消さず、AI/有料Bot/SNSなしで実装する。
 
@@ -272,3 +272,15 @@ NOT(IN([brandId], SELECT(Wishlist[brandId], [status] = "飲みたい")))
 11. 別アカウントにコピーした後もWishlistを含む6テーブルと写真フォルダが本人所有
 
 このファイルの存在はAppSheet本体への適用を証明しない。AppSheetエディタに反映し、QAを実測して完了判定する。
+
+## 実アプリへの適用記録（2026-10-15）
+
+- 同じGoogle Sheetsに接続する6テーブルを維持し、既存データを置き換えずに本仕様を適用した。
+- Wishlist追加アクションはbrandIdを設定し、wishlistId/priority/status/addedAtはテーブルのInitial valueで生成。新規行を実際に保存して期待値を確認した。
+- フォーム保存後の遷移はイベント用アクションを増設せず、標準のFinish view=飲酒履歴で実装した。
+- 表示用仮想列はフォームで隠す。銘柄詳細のRelated Reviews/Related Bottlesは「この銘柄の記録」/「商品」とし、Reviews_Inlineも写真付きDeckへ変更した。
+- 飲酒履歴はdrinkingDate/createdAt降順、飲みたいはpriorityOrder昇順/addedAt降順、産地別はreviewPrefectureでグループ・drinkingDate降順。
+- 見た目は[Airbnb参照](https://github.com/ryotamatsuki/design-md-references/blob/main/airbnb/DESIGN.md)を基本に、[Wise参照](https://github.com/ryotamatsuki/design-md-references/blob/main/wise/DESIGN.md)のforest #163300をアクセントとして利用。Light / Black-White / Open Sans。独自CSSの移植はしていない。
+- ブラウザ試験で再記録の新ID、評価・タグ非コピー、写真あり/なし履歴、評価4以上、産地グループ、Wishlist同期・登録済み抑止・飲んだ除外を確認した。
+- 今回の試験用レビューとWishlist行は削除。元のレビューと写真を読み戻して保持を確認した。
+- AppSheetはPrototype、GitHub PR #1はDraftのまま。配布・課金・セキュリティ設定は変更していない。
