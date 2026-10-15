@@ -1,4 +1,4 @@
-# Sakefolio MVP QA / 受入試験 v1.1
+# Sakefolio MVP QA / 受入試験 v1.2
 
 更新: 2026-10-15 JST。AppSheet本体を生成し、クラウドブラウザで基本動作を検証した。iPhone実機・家族配布は未検証。
 
@@ -62,13 +62,41 @@
 - [x] 「UX改修Stage2」タブにAppSheet適用値と状態を記録
 - [x] docs/VIVINO_CORE_UX_STAGE2.md に5機能分のビュー/仮想列/アクション/スライス仕様を作成
 
-### AppSheetエディタ未適用・未検証
-- [ ] AppSheetへWishlistテーブル追加とKey/Ref/Enum型設定
-- [ ] Reviews.coverImage仮想Image列設定・写真カード表示の実機確認
-- [ ] Brands詳細の列順、レビュー一覧、アクション配置確認
-- [ ] Reviews「もう一度飲む」アクションと簡略化フォームの確認
-- [ ] Wishlist登録アクション、重複防止、WishlistActiveビューの操作確認
-- [ ] Brandsの銘柄/酒蔵/県名検索と高評価/産地別フィルター
-- [ ] 初期レビュー・写真の保存性と別アカウントコピーの回帰試験
+### AppSheet本体への適用・ブラウザ試験 — 2026-10-15
 
-**判定**: Google Sheetsデータ構造とAppSheet実装仕様の更新は実施済み。AppSheet画面自体の更新と5機能の動作は未完了。外部APIを使ったAI認識は対象外。
+- [x] 同じSheetsのWishlistを6番目のテーブルとして接続。Key/Ref/Enum/DateTime、初期値を設定
+- [x] Reviews.coverImage、reviewSubtitle、reviewPrefectureを仮想列として追加。reviewTitleを銘柄・商品名へ整理
+- [x] 飲酒履歴を写真・評価・日付・産地付きDeckに更新。飲んだ日降順、作成日時降順。写真なしの記録も表示
+- [x] 銘柄詳細に日本語の銘柄・酒蔵・産地、関連記録・商品、さけのわ出典を表示。関連ReviewsもDeckに変更
+- [x] 「この日本酒を記録」「もう一度飲む」を追加。銘柄・商品を引き継ぎ、新規レビューを作成
+- [x] 記録する/Reviews_Formを銘柄→評価→日付→写真→タグ→商品→任意項目の順に整理。Finish view=飲酒履歴
+- [x] WishlistActiveと飲みたいDeck、Brandsからの追加、登録済みボタン抑止を設定
+- [x] お気に入り（rating>=4）と産地別（reviewPrefecture）をMenuへ追加
+- [x] Primaryを飲酒履歴/銘柄を探す/記録する/飲みたいの4つに整理
+- [x] 銘柄「テスト」、県名「愛媛県」、酒蔵「梅錦山川」で検索結果を確認
+- [x] 保存済みレビュー0189a270の代表写真を履歴で目視確認
+- [x] 「もう一度飲む」から評価・タグが空のフォームを開き、評価4・写真なしの試験レビュー48a9b957を保存。Sheetsに新ID、空のタグ/尺度を確認
+- [x] お気に入りに評価4だけが表示、評価3が含まれないことを確認
+- [x] 産地別で愛媛県グループに両レビューを表示
+- [x] Wishlist試験行30d07888を追加、SheetsにbrandId/中/飲みたい/日時を確認。追加後ボタン非表示、状態飲んだで一覧から除外
+- [x] 今回の試験レビュー・Wishlist行をアプリから削除し、Sheetsで消失を確認。元のレビュー0189a270・写真43a9f36fの全取得セルと画像相対パスは変更前と同じ
+- [x] エディタ保存後、実アプリ再読込で配色・画面・日本語ラベル・ナビゲーションアイコンを確認
+
+### デザイン適用
+
+参照: ryotamatsuki/design-md-references の airbnb/DESIGN.md と wise/DESIGN.md。
+Airbnbの白い画面・写真と情報の優先順位、Wiseのforest #163300をAppSheet標準UIへ適用。
+Light、Primary #163300、Black/White、Open Sans、画面名ヘッダーを設定。
+履歴はbook-open、検索search、記録plus、飲みたいbookmark、お気に入りstar。
+再記録はrepeat、Wishlist追加はbookmark。検索一覧の操作バーを隠して銘柄/酒蔵/産地を表示。
+CSSや独自コンポーネントの移植ではなく、AppSheetが提供するテーマ・Deck・アイコンによる適用。
+
+### 残る検証
+
+- [ ] iPhone実機のカメラ・複数写真・低速回線
+- [ ] 家族の別Googleアカウントへの6テーブル・画像フォルダの所有権を含むコピー試験
+- [ ] 商品ありの再記録、商品候補変更の整合性、多数のWishlistの優先順の実データ試験
+- [ ] 写真なし→表ラベルなし→複数表ラベルの代表選択パターン（式は設定済み、今回目視は既存表ラベル1枚）
+- [ ] かな/別名検索はマスターに読み情報がなく未対応
+
+**判定**: 5機能をAppSheet本体へ適用し、上記ブラウザ/Sheets試験を実施。iPhone・別アカウントコピーの受入は未完了。PRはDraft、アプリはPrototypeを維持。AI認識は対象外。
