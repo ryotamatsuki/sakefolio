@@ -1,4 +1,5 @@
 import type { Brand, RecordEntry, StorageInfo, TokenResponse } from './types';
+import { detectPhotoType, validateRecordInput, verifyPhoto } from './security';
 
 /**
  * The only OAuth scope requested. No refresh token, client secret, or user file
@@ -60,19 +61,32 @@ export async function requestGoogleAccess(): Promise<string> {
 export function revokeAccess(token: string) {
   window.google?.accounts.oauth2.revoke(token, () => undefined);
 }
+const APP_MARKER = 'sakefolio-react-v1';
+type FileKind = 'root' | 'photos-folder' | 'spreadsheet' | 'photo';
+const metadata = (kind: FileKind) => ({appProperties: {sakefolioApp: APP_MARKER, sakefolioKind:kind}});
 interface DriveFile { id: string; name?: string; mimeType?: string }
-async function findFile(token: string, name: string, parentId?: string, mimeType?: string): Promise<DriveFile | undefined> {
+export interface DriveAccount { emailAddress:string; displayName:string }
+export async function getDriveAccount(token: string): Promise<DriveAccount> {
+  const info = await api<{user?: DriveAccount}>(token,
+    'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)');
+  if (!info.user?.emailAddress) throw new Error('Googleアカウントの本人確認情報を取得できません。');
+  return info.user;
+}
+async function findFile(token: string, name: string, parentId: string, mimeType: string, kind: FileKind): Promise<DriveFile | undefined> {
   const safe = (x: string) => x.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const q = [
     "name = '" + safe(name) + "'",
     "trashed = false",
-    parentId ? "'" + safe(parentId) + "' in parents" : '',
-    mimeType ? "mimeType = '" + safe(mimeType) + "'" : ''
+    "'" + safe(parentId) + "' in parents",
+    "mimeType = '" + safe(mimeType) + "'",
+    "appProperties has { key='sakefolioApp' and value='" + APP_MARKER + "' }",
+    "appProperties has { key='sakefolioKind' and value='" + kind + "' }"
   ].filter(Boolean).join(' and ');
   const url = 'https://www.googleapis.com/drive/v3/files?' + new URLSearchParams({
     q, fields: 'nextPageToken,files(id,name,mimeType)', pageSize: '100'
   }).toString();
   const result = await api<{files: DriveFile[]}>(token, url);
+  if ((result.files?.length || 0) > 1) throw new Error('同じ役割のSakefolio保存先が複数あります。自動的に選ばず、管理者が確認してください。');
   return result.files?.[0];
 }
 async function createFile(token: string, metadata: Record<string, unknown>): Promise<DriveFile> {
@@ -97,7 +111,12 @@ async function initializeSpreadsheet(token: string, id: string): Promise<void> {
     await api(token, 'https://sheets.googleapis.com/v4/spreadsheets/' + id + ':batchUpdate',
       {method:'POST',body:JSON.stringify({requests})});
   }
-  const data = names.map(name => ({range: "'" + name + "'!A1", values: [TABLE_HEADERS[name]]}));
+  const data = [];
+  for (const name of names) {
+    const current = await getRows(token,id,name,'A1:AZ1');
+    if (!current.length) data.push({range:"'"+name+"'!A1",values:[TABLE_HEADERS[name]]});
+  }
+  if (!data.length) return;
   await api(token, 'https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values:batchUpdate',
     {method:'POST',body:JSON.stringify({valueInputOption:'RAW',data})});
 }
@@ -105,18 +124,35 @@ async function initializeSpreadsheet(token: string, id: string): Promise<void> {
 export async function ensureStorage(token: string): Promise<StorageInfo> {
   const folderMime = 'application/vnd.google-apps.folder';
   const sheetMime = 'application/vnd.google-apps.spreadsheet';
-  let folder = await findFile(token, 'Sakefolio', undefined, folderMime);
-  if (!folder) folder = await createFile(token, {name:'Sakefolio',mimeType:folderMime});
-  let photos = await findFile(token,'Photos',folder.id,folderMime);
-  if (!photos) photos = await createFile(token,{name:'Photos',mimeType:folderMime,parents:[folder.id]});
-  let spreadsheet = await findFile(token,'Sakefolio_Data',folder.id,sheetMime);
-  if (!spreadsheet) {
-    spreadsheet = await createFile(token,{name:'Sakefolio_Data',mimeType:sheetMime,parents:[folder.id]});
-    await initializeSpreadsheet(token,spreadsheet.id);
+  let folder = await findFile(token, 'Sakefolio', 'root', folderMime, 'root');
+  if (!folder) folder = await createFile(token,{name:'Sakefolio',mimeType:folderMime,...metadata('root')});
+  let photos = await findFile(token,'Photos',folder.id,folderMime,'photos-folder');
+  if (!photos) photos = await createFile(token,{name:'Photos',mimeType:folderMime,parents:[folder.id],...metadata('photos-folder')});
+  let spreadsheet = await findFile(token,'Sakefolio_Data',folder.id,sheetMime,'spreadsheet');
+  if (!spreadsheet) spreadsheet = await createFile(token,{name:'Sakefolio_Data',mimeType:sheetMime,parents:[folder.id],...metadata('spreadsheet')});
+  // Validate known schema. Only initialize an empty/partially created app-owned workbook;
+  // never rewrite the headings of a populated workbook.
+  const structure = await api<{sheets:{properties:{sheetId:number,title:string}}[]}>(token,
+    'https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheet.id+'?fields=sheets(properties(sheetId,title))');
+  const allTitles = new Set(structure.sheets.map(item => item.properties.title));
+  let needsSetup = Object.keys(TABLE_HEADERS).some(table=>!allTitles.has(table));
+  if (!needsSetup) {
+    for (const [table, expected] of Object.entries(TABLE_HEADERS)) {
+      const cells = await getRows(token,spreadsheet.id,table,'A1:AZ1');
+      const current = cells[0] || [];
+      if (current.length === 0) { needsSetup = true; continue; }
+      if (expected.some((name,index) => current[index] !== name))
+        throw new Error('保存先の「'+table+'」の列構造が変わっています。データ保護のため書き込みを中止しました。');
+    }
   }
-  // A failed initialization can leave an empty file; re-check basic headers.
-  const preview = await getRows(token,spreadsheet.id,'Reviews', 'A1:B2');
-  if (!preview.length || preview[0]?.[0] !== 'reviewId') {
+  if (needsSetup) {
+    // Guard every populated sheet before filling missing tabs/headers.
+    for (const [table,expected] of Object.entries(TABLE_HEADERS)) {
+      if (!allTitles.has(table)) continue;
+      const current = (await getRows(token,spreadsheet.id,table,'A1:AZ1'))[0] || [];
+      if (current.length && expected.some((name,index)=>current[index]!==name))
+        throw new Error('保存先の「'+table+'」が予期しない形式のため初期化を中止しました。');
+    }
     await initializeSpreadsheet(token,spreadsheet.id);
   }
   return {folderId:folder.id,photoFolderId:photos.id,spreadsheetId:spreadsheet.id};
@@ -158,18 +194,18 @@ export async function loadManualBrands(token: string, storage: StorageInfo): Pro
   }));
 }
 export async function uploadPhoto(token: string, folderId: string, file: File): Promise<string> {
-  if (!file.type.startsWith('image/')) throw new Error('画像ファイルのみ保存できます。');
-  if (file.size > 10 * 1024 * 1024) throw new Error('写真は10MB以下にしてください。');
+  const verified = await verifyPhoto(file);
   const boundary = 'sakefolio_' + crypto.randomUUID().replace(/-/g,'');
-  const name = crypto.randomUUID() + '.' + (file.name.split('.').pop() || 'jpg').replace(/[^a-z0-9]/gi, '').slice(0,8);
-  const metadata = {name,parents:[folderId],description:'Sakefolio private label photo'};
+  // Generated name and content type derive from verified magic bytes, not user input.
+  const name = crypto.randomUUID() + '.' + verified.extension;
+  const photoMetadata = {name,parents:[folderId],description:'Sakefolio private label photo',...metadata('photo')};
   const delimiter = '\r\n--' + boundary + '\r\n';
   const body = new Blob([
     '--' + boundary + '\r\n',
     'Content-Type: application/json; charset=UTF-8\r\n\r\n',
-    JSON.stringify(metadata),
+    JSON.stringify(photoMetadata),
     delimiter,
-    'Content-Type: ' + file.type + '\r\n\r\n',
+    'Content-Type: ' + verified.mime + '\r\n\r\n',
     file,
     '\r\n--' + boundary + '--'
   ]);
@@ -184,11 +220,16 @@ export async function getPhotoBlob(token: string, id: string): Promise<Blob> {
   const response = await fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?alt=media',
     {headers: {Authorization:'Bearer ' + token}});
   if (!response.ok) throw new Error('写真の読み込みに失敗しました。');
-  return response.blob();
+  const blob = await response.blob();
+  if (!blob.size || blob.size > 10 * 1024 * 1024 || !detectPhotoType(new Uint8Array(await blob.slice(0,32).arrayBuffer())))
+    throw new Error('保存された写真が未対応の形式です。');
+  return blob;
 }
 export async function saveRecord(
   token: string, storage: StorageInfo, entry: RecordEntry, knownBrands: Brand[], photo: File | null
 ): Promise<void> {
+  validateRecordInput(entry);
+  if (photo) await verifyPhoto(photo); // Before creating any rows or uploading data.
   const now = new Date().toISOString();
   let brandId = entry.brandId;
   if (!brandId) {
