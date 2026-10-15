@@ -24,7 +24,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install --no-audit --no-fund
+      - run: npm install --no-fund
+        working-directory: web
+      - name: Print generated lockfile for one-time archival
+        run: |
+          node -e "const b=require('fs').readFileSync('package-lock.json').toString('base64'); console.log('SAKE_LOCK_BEGIN'); for(let i=0;i<b.length;i+=4000)console.log('SAKE_LOCK_CHUNK='+b.slice(i,i+4000)); console.log('SAKE_LOCK_END');"
+        working-directory: web
+      - name: Test input and photo guards
+        run: npm run test:security
+        working-directory: web
+      - name: Audit all dependencies
+        run: npm audit --audit-level=high
         working-directory: web
       - run: npm run build
         working-directory: web
