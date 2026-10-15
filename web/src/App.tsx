@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { Brand, RecordEntry, StorageInfo } from './types';
 import { breweryMapsUrl, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
-import { ensureStorage, getPhotoBlob, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord } from './google';
+import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord } from './google';
 
 type Tab = 'home' | 'explore' | 'record' | 'places';
 function todayLocal(): string {
@@ -49,6 +49,7 @@ export default function App() {
   const [records, setRecords] = useState<RecordEntry[]>([]);
   const [token, setToken] = useState('');
   const [storage, setStorage] = useState<StorageInfo | null>(null);
+  const [accountEmail, setAccountEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
@@ -74,19 +75,21 @@ export default function App() {
     setBusy(true); setMessage('');
     try {
       const accessToken = await requestGoogleAccess();
+      const account = await getDriveAccount(accessToken);
       const myStorage = await ensureStorage(accessToken);
       const [saved, added] = await Promise.all([
         loadRecords(accessToken, myStorage),loadManualBrands(accessToken,myStorage)
       ]);
       setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);
-      setMessage('Google Driveに接続しました。保存先はこのアカウントのSakefolioフォルダです。');
+      setAccountEmail(account.emailAddress);
+      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '接続に失敗しました。');
     } finally { setBusy(false); }
   };
   const disconnect = () => {
     if (token) revokeAccess(token);
-    setToken('');setStorage(null);setRecords([]);setManualBrands([]);
+    setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
     setPhoto(null);setEntry(emptyEntry());setMessage('接続を解除しました。');setMenuOpen(false);
   };
   const update = (field: keyof RecordEntry, value: string) => setEntry(e => ({...e, [field]:value}));
@@ -163,12 +166,12 @@ export default function App() {
         </nav>
         <div className="header-actions">
           {token ? <button className="account-button" onClick={() => setMenuOpen(v=>!v)} type="button">
-            <span className="connection-dot"/><span className="account-label">My Drive</span><ChevronDown size={15}/>
+            <span className="connection-dot"/><span className="account-label">{accountEmail || 'My Drive'}</span><ChevronDown size={15}/>
           </button> : <button className="button button-dark button-small" disabled={busy || !GOOGLE_CLIENT_ID}
             type="button" onClick={connect}><LogIn size={16}/>Googleで始める</button>}
         </div>
         {menuOpen && token && <div className="account-menu">
-          <div className="account-info"><ShieldCheck size={18}/>このGoogleアカウントのDriveに保存中</div>
+          <div className="account-info"><ShieldCheck size={18}/><span>{accountEmail}<br/>このGoogleアカウントのDriveに保存中</span></div>
           {storage && <a href={'https://drive.google.com/drive/folders/'+storage.folderId}
             target="_blank" rel="noopener noreferrer">保存フォルダを開く <ExternalLink size={14}/></a>}
           <button type="button" onClick={disconnect}><LogOut size={15}/>接続を解除</button>
@@ -369,7 +372,7 @@ export default function App() {
           </div>
           <div className="save-area">
             <div className="save-security"><ShieldCheck size={19}/>
-              <span>{token ? 'このアカウントのGoogle Drive / Sheetsだけに保存します。' : 'Google接続後に、ご本人のDriveへ保存します。'}</span></div>
+              <span>{token ? accountEmail+' のGoogle Drive / Sheetsに保存します。' : 'Google接続後に、ご本人のDriveへ保存します。'}</span></div>
             {token ? <button disabled={busy} type="submit" className="button button-dark button-save">
               {busy?'保存しています…':'この一杯を記録する'} <ArrowRight size={19}/></button>
               : <button disabled={busy||!GOOGLE_CLIENT_ID} type="button" onClick={connect} className="button button-dark button-save">
