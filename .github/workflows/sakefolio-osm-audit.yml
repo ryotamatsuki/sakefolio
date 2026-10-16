@@ -1,0 +1,34 @@
+name: Sakefolio OSM brewery geolocation audit
+on:
+  push:
+    branches: [test/sakefolio-pages-preview]
+    paths:
+      - ".github/workflows/sakefolio-osm-audit.yml"
+      - "web/scripts/audit-osm-breweries.mjs"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: sakefolio-osm-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Query OpenStreetMap brewery features and cross-check all 1305
+        run: node scripts/audit-osm-breweries.mjs
+        working-directory: web
+      - name: Commit provenance and candidate report
+        run: |
+          git config user.name "sakefolio-audit-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/brewery-osm-location-audit.json
+          if ! git diff --cached --quiet; then
+            git commit -m "data: cross-check sake breweries against OSM feature locations"
+            git push origin "HEAD:refs/heads/test/sakefolio-pages-preview"
+          fi
