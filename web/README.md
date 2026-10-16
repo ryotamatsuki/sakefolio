@@ -71,3 +71,14 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 - ライセンス: MIT License, Copyright (c) 2020 Code for SAKE （同梱 `web/public/SAKEOpenData-LICENSE.txt`）。
 - 住所は更新日時・所在地変更・製造所と会社所在地の差のため正確性を保証しません。緯度経度は未収録であり、**地図に正確なピンを置けると解釈しない**でください。現段階ではGoogleマップでの検索・確認を可能にします。
 - 既存の個人登録住所は上書きしません。未一致の酒蔵も手入力できます。旧AppSheetデータは対象外です。
+
+## 酒蔵の代表点ジオコーディング（2026-10-16）
+- さけのわ銘柄マスターの1,305酒蔵（蔵元名+都道府県で集計）とSAKEOpenDataの住所を完全一致で結合し、住所が一意な975蔵元を対象にしました。
+- デジタル庁アドレス・ベース・レジストリを元とする **Geolonia Japanese Addresses v2** と `@geolonia/normalize-japanese-addresses` を使用し、一括ジオコーディングを実行しました。
+- 結果: **地番・住居表示の代表点 384件、町丁目代表点 513件、未解決78件**。有効座標は計897件です。町丁目代表点は**酒蔵の正確な位置ではありません**。
+- 成果: `public/brewery-coordinates.json` は `lat, lon, precision, source, address, breweryName, prefecture` を持ちます。監査結果 `data/brewery-geocoding-report.json` に全975件の変換状態・不一致・取得エラー等を記録。
+- `precision=lot_or_address` は住居表示フロンテージまたは地番の代表点であり、酒蔵建物・入口・仕込み場の位置を実地確認したものではありません。`precision=town_approximate` は町丁目内の参考位置です。ピン表示時は精度を区別してください。
+- 酒蔵名の変更、所在地移転、SAKEOpenDataに記載された本社住所と製造所の不一致、表記揺れ・住所古さは未検証です。
+- パイプライン: `scripts/geocode-breweries.mjs`, `.github/workflows/sakefolio-geocode.yml`。`public/brewery-addresses.json` から再生成可能です。
+- データ出典: [SAKEOpenData](https://github.com/Code-for-SAKE/SAKEOpenData) (MIT), [Geolonia 住所データ v2](https://github.com/geolonia/japanese-addresses-v2) (CC BY 4.0, 元データ: デジタル庁「アドレス・ベース・レジストリ」)。Googleマップから座標を抽出・スクレイピングしていません。
+- 未解決の酒蔵について、実際の建物位置が検証できる公的施設情報や蔵元の住所確認を追加することで精度をさらに高められます。公開Jageocoderデモへの大量リクエストは行いません。
