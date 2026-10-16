@@ -1,0 +1,39 @@
+name: Sakefolio official brewery site location audit
+on:
+  push:
+    branches: [test/sakefolio-pages-preview]
+    paths:
+      - ".github/workflows/sakefolio-official-sites.yml"
+      - "web/scripts/audit-official-brewery-sites.mjs"
+      - "web/data/brewery-official-site-targets.json"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: sakefolio-official-site-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.repository == 'ryotamatsuki/sakefolio'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install robots parser
+        run: npm install --no-save --package-lock=false --ignore-scripts robots-parser
+        working-directory: web
+      - name: Audit all breweries
+        run: node scripts/audit-official-brewery-sites.mjs
+        working-directory: web
+      - name: Commit audit report
+        run: |
+          git config user.name "sakefolio-audit-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/brewery-official-site-audit.json
+          if ! git diff --cached --quiet; then
+            git commit -m "data: audit official brewery sites for location evidence"
+            git push origin "HEAD:refs/heads/test/sakefolio-pages-preview"
+          fi
