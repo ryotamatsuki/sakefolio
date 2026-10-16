@@ -34,7 +34,7 @@ for(const t of targets){
   if(existing&&km(existing.lat,existing.lon,selected.lat,selected.lon)<0.025)reason='already_within_25m';
   else{
    const point={...existing,breweryName:t.breweryName,prefecture:t.prefecture,address:t.address||existing?.address||'',
-    lat:selected.lat,lon:selected.lon,precision:'facility_osm_verified',source:'OpenStreetMap contributors (ODbL), independent official address/site cross-check',
+    lat:selected.lat,lon:selected.lon,pointLevel:9,precision:'facility_osm_verified',source:'OpenStreetMap contributors (ODbL), independent official address/site cross-check',
     osmElement:selected.id,verification:{websiteMatch:selected.websiteMatch,addressMatch:selected.addressMatch,officialAddressMatch:verifiedAddress,sourceUrl:'https://www.openstreetmap.org/'+selected.id,checkedAt:new Date().toISOString()}};
    prev.set(id,point);
    updated.push({breweryName:t.breweryName,prefecture:t.prefecture,old:existing?{lat:existing.lat,lon:existing.lon,precision:existing.precision}:null,new:{lat:point.lat,lon:point.lon,precision:point.precision},distanceMovedMeters:existing?Math.round(km(existing.lat,existing.lon,point.lat,point.lon)*1000):null,osmElement:selected.id});
