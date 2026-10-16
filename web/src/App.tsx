@@ -9,7 +9,8 @@ import type { SaveAttempt } from './google';
 import { validateRecordInput } from './security';
 import type { Brand, RecordEntry, StorageInfo } from './types';
 import { createPhotoPreview } from './photos';
-import { breweryMapsUrl, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
+import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
+import type { BreweryOption } from './catalog';
 import { AROMA_GROUPS, POPULAR_AROMA_IDS, SENSORY_AXES, TASTE_GROUPS, selectedIds, tagLabels, toggleIds } from './sensory';
 import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
 
@@ -71,11 +72,22 @@ export default function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showAllAromas, setShowAllAromas] = useState(false);
   const [aromaSearch, setAromaSearch] = useState('');
+  const [breweryPickerOpen,setBreweryPickerOpen]=useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Invalidates outstanding requests before a disconnect or another connection.
   const session = useRef(0);
   const operation = useRef(false);
   const brands = useMemo(() => [...manualBrands, ...catalog], [manualBrands, catalog]);
+  const breweries=useMemo(()=>listBreweries(brands,records),[brands,records]);
+  const breweryMatches=useMemo(()=>{
+    const q=entry.breweryName.trim().toLocaleLowerCase('ja');
+    if(!q)return [];
+    return breweries.filter(b=>b.name.toLocaleLowerCase('ja').includes(q))
+      .sort((a,b)=>Number(b.name.toLocaleLowerCase('ja').startsWith(q))-Number(a.name.toLocaleLowerCase('ja').startsWith(q))
+      ||a.name.localeCompare(b.name,'ja')).slice(0,8);
+  },[breweries,entry.breweryName]);
+  const mapUrl=entry.breweryName.trim()?breweryMapsUrl(entry.breweryName,entry.prefecture,entry.municipality,entry.breweryAddress):'';
+  const routeUrl=entry.breweryName.trim()?breweryDirectionsUrl(entry.breweryName,entry.prefecture,entry.municipality,entry.breweryAddress):'';
 
   useEffect(() => {
     loadBrands().then(setCatalog).catch(err => setMessage(String(err.message || err)));
@@ -132,11 +144,24 @@ export default function App() {
   const update = (field: keyof RecordEntry, value: string) => setEntry(e => ({...e, [field]:value}));
   const toggleAroma = (id: string) => setEntry(e=>({...e, aromaTagIds:toggleIds(e.aromaTagIds,id)}));
   const toggleTaste = (id: string) => setEntry(e=>({...e, tasteTagIds:toggleIds(e.tasteTagIds,id)}));
+  const selectBrewery=(brewery:BreweryOption)=>{
+    if(pendingSave.current)return;
+    setEntry(e=>{
+      const same=e.breweryName===brewery.name&&e.prefecture===brewery.prefecture;
+      return {...e,brandId:same?e.brandId:'',brandName:same?e.brandName:'',
+        breweryName:brewery.name,prefecture:brewery.prefecture,
+        municipality:brewery.municipality||(same?e.municipality:''),
+        breweryAddress:brewery.address||(same?e.breweryAddress:'')};
+    });
+    setBreweryPickerOpen(false);
+  };
   const setSelectedBrand = (brand: Brand) => {
     if (pendingSave.current) {setTab('record');setMessage('未完了の記録を先に再確認・再開してください。');return;}
+    const located=breweries.find(b=>b.name===brand.breweryName&&b.prefecture===brand.prefecture);
     setEntry(e => ({...e,brandId:brand.brandId,brandName:brand.brandName,
       breweryName:brand.breweryName,prefecture:brand.prefecture,
-      municipality:'',breweryAddress:''}));
+      municipality:located?.municipality||'',breweryAddress:located?.address||''}));
+    setBreweryPickerOpen(false);
     setTab('record');setSearch('');window.scrollTo({top:0,behavior:'smooth'});
   };
   const save = async (event: FormEvent<HTMLFormElement>) => {
@@ -347,11 +372,24 @@ export default function App() {
           <div className="form-block">
             <div className="form-step"><span>01</span><div><h2>どこのお酒？</h2><p>酒蔵と銘柄、産地を記録しましょう。</p></div></div>
             <div className="form-fields">
-              <div className="field-inline-note"><Compass size={16}/> <span>銘柄を先に選ぶと酒蔵・都道府県が自動入力されます。</span>
+              <div className="field-inline-note"><Compass size={16}/> <span>酒蔵または銘柄を選ぶとGoogleマップが自動で検索準備されます。</span>
                 <button type="button" onClick={()=>goto('explore')}>銘柄を探す <ArrowRight size={14}/></button></div>
               <div className="field-grid two">
-                <label>酒蔵名 <span className="required">必須</span>
-                  <input required value={entry.breweryName} onChange={e=>setEntry(v=>({...v,breweryName:e.target.value,brandId:''}))} placeholder="例：石鎚酒造"/></label>
+                <div className="brewery-picker">
+                  <label htmlFor="brewery-name">酒蔵名 <span className="required">必須</span>
+                    <input id="brewery-name" required autoComplete="off" value={entry.breweryName}
+                      onFocus={()=>setBreweryPickerOpen(true)}
+                      onChange={e=>{const value=e.target.value;setEntry(v=>({...v,breweryName:value,brandId:'',prefecture:value===v.breweryName?v.prefecture:'',municipality:'',breweryAddress:''}));setBreweryPickerOpen(true);}}
+                      onKeyDown={e=>{if(e.key==='Escape')setBreweryPickerOpen(false);}}
+                      aria-controls="brewery-options" aria-expanded={breweryPickerOpen&&breweryMatches.length>0}
+                      placeholder="酒蔵名を入力して候補を選択"/>
+                  </label>
+                  {breweryPickerOpen&&breweryMatches.length>0&&<div id="brewery-options" className="brewery-suggestions" role="group" aria-label="酒蔵の候補">
+                    {breweryMatches.map(b=><button key={b.name+'|'+b.prefecture} type="button" onClick={()=>selectBrewery(b)}>
+                      <strong>{b.name}</strong><span>{[b.prefecture,b.municipality].filter(Boolean).join('・')||'所在地未登録'}</span>
+                    </button>)}
+                  </div>}
+                </div>
                 <label>銘柄名 <span className="required">必須</span>
                   <input required value={entry.brandName} onChange={e=>setEntry(v=>({...v,brandName:e.target.value,brandId:''}))} placeholder="例：石鎚"/></label>
               </div>
@@ -363,9 +401,17 @@ export default function App() {
               </div>
               <label>酒蔵の住所（任意）<input value={entry.breweryAddress} onChange={e=>update('breweryAddress',e.target.value)}
                 placeholder="所在地が分かる場合は住所を入力"/></label>
-              {(entry.breweryName || entry.prefecture) && <a className="inline-map-link" target="_blank"
-                rel="noopener noreferrer" href={breweryMapsUrl(entry.breweryName,entry.prefecture,entry.municipality,entry.breweryAddress)}>
-                <MapPin size={17}/> Googleマップで酒蔵を検索する <ExternalLink size={14}/></a>}
+              {!!mapUrl&&<div className="brewery-map-panel">
+                <div className="brewery-map-title"><MapPin size={19}/><div>
+                  <strong>{entry.breweryName}の地図</strong>
+                  <span>{[entry.prefecture,entry.municipality,entry.breweryAddress].filter(Boolean).join(' / ')||'酒蔵名から検索'}</span>
+                </div></div>
+                <div className="brewery-map-actions">
+                  <a href={mapUrl} target="_blank" rel="noopener noreferrer"><MapPin size={16}/>Googleマップで場所を確認<ExternalLink size={14}/></a>
+                  <a href={routeUrl} target="_blank" rel="noopener noreferrer"><Compass size={16}/>経路案内<ExternalLink size={14}/></a>
+                </div>
+                <p>選んだ酒蔵名と所在地からGoogleマップを検索します。候補が正しいか確認してください。未確認の位置を自動確定しません。</p>
+              </div>}
               <p className="field-help">所在地は酒蔵の所在地として記録します。お酒の製造場所や原料米の産地とは必ずしも同じではありません。</p>
             </div>
           </div>

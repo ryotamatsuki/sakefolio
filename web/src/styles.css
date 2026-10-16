@@ -270,3 +270,21 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
  .sensory-segments button small{font-size:9px}
  .sensory-chip{font-size:12px;min-height:43px;padding:10px 12px}
 }
+
+/* Responsive brewery autocomplete and Google Maps integration */
+.brewery-picker{position:relative;min-width:0}
+.brewery-picker>label{display:flex;flex-direction:column;gap:9px;font-size:12px;color:#465b4b;font-weight:700}
+.brewery-suggestions{position:absolute;top:100%;left:0;right:0;z-index:25;max-height:275px;overflow:auto;border:1px solid #bed1c0;border-radius:10px;box-shadow:0 12px 28px #172d1f2a;background:#fff}
+.brewery-suggestions button{background:#fff;width:100%;min-height:46px;border:0;border-bottom:1px solid #edf0ea;display:flex;align-items:center;justify-content:space-between;text-align:left;gap:8px;padding:11px 12px;color:#2c4b34}
+.brewery-suggestions button:hover,.brewery-suggestions button:focus-visible{background:#edf5ec;outline:2px solid #89a987;outline-offset:-2px}
+.brewery-suggestions strong{font-size:12px}.brewery-suggestions span{font-size:11px;color:#7b917c;text-align:right}
+.brewery-map-panel{background:#f4f8f2;border:1px solid #cddfcd;border-radius:13px;padding:18px;display:flex;flex-direction:column;gap:13px}
+.brewery-map-title{display:flex;align-items:flex-start;gap:10px;color:#2d6240}
+.brewery-map-title>div{display:flex;flex-direction:column;gap:5px}
+.brewery-map-title strong{font-size:14px;color:#294c33}
+.brewery-map-title span{font-size:11px;color:#6c8772;line-height:1.6;overflow-wrap:anywhere}
+.brewery-map-actions{display:flex;gap:9px;flex-wrap:wrap}
+.brewery-map-actions a{min-height:44px;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 13px;border:1px solid #afc7af;border-radius:9px;background:#fff;color:#305e3a;font-size:12px;font-weight:750}
+.brewery-map-actions a:first-child{background:#255639;color:#fff;border-color:#255639}
+.brewery-map-panel>p{font-size:11px;color:#788b78;line-height:1.7}
+@media(max-width:760px){.brewery-map-panel{padding:13px}.brewery-map-actions a{width:100%}.brewery-suggestions button{min-height:50px}}

@@ -191,7 +191,9 @@ export async function loadManualBrands(token: string, storage: StorageInfo): Pro
     brandId: String(row[headers.indexOf('brandId')] || ''),
     brandName: String(row[headers.indexOf('brandName')] || ''),
     breweryName: String(row[headers.indexOf('breweryName')] || ''),
-    prefecture: String(row[headers.indexOf('prefecture')] || '')
+    prefecture: String(row[headers.indexOf('prefecture')] || ''),
+    municipality: String(row[headers.indexOf('municipality')] || ''),
+    breweryAddress: String(row[headers.indexOf('breweryAddress')] || '')
   }));
 }
 export async function uploadPhoto(token: string, folderId: string, file: File, id?: string, reviewId?: string): Promise<string> {

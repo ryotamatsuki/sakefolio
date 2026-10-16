@@ -23,10 +23,35 @@ export const PREFECTURES = [
   '熊本県','大分県','宮崎県','鹿児島県','沖縄県'
 ] as const;
 
-/** No fabricated coordinates: opens Google Maps search for the exact brewery and location. */
-export function breweryMapsUrl(name: string, prefecture: string, municipality: string, address: string): string {
-  const query = [name, prefecture, municipality, address].filter(Boolean).join(' ');
-  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(query);
+/** Google Maps URLs work without an API key. These are search candidates, not verified pins. */
+export function breweryMapsQuery(name:string,prefecture:string,municipality:string,address:string):string {
+ const n=name.trim(),p=prefecture.trim(),m=municipality.trim(),a=address.trim();
+ if(!n)return '';
+ const place=a?(p&&!a.includes(p)?p+' '+a:a):[p,m].filter(Boolean).join(' ');
+ return [n,place].filter(Boolean).join(' ');
+}
+export function breweryMapsUrl(name:string,prefecture:string,municipality:string,address:string):string {
+ return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(breweryMapsQuery(name,prefecture,municipality,address));
+}
+export function breweryDirectionsUrl(name:string,prefecture:string,municipality:string,address:string):string {
+ return 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(breweryMapsQuery(name,prefecture,municipality,address));
+}
+export interface BreweryOption {name:string;prefecture:string;municipality:string;address:string;count:number}
+export function listBreweries(brands:Brand[],records:{breweryName:string;prefecture:string;municipality?:string;breweryAddress?:string}[]=[]):BreweryOption[]{
+ const map=new Map<string,BreweryOption>();
+ for(const b of brands){
+  const name=b.breweryName.trim(),prefecture=b.prefecture.trim();if(!name)continue;
+  const k=name+'|'+prefecture,v=map.get(k);
+  if(!v)map.set(k,{name,prefecture,municipality:b.municipality||'',address:b.breweryAddress||'',count:1});
+  else{v.count++;if(!v.municipality&&b.municipality)v.municipality=b.municipality;if(!v.address&&b.breweryAddress)v.address=b.breweryAddress;}
+ }
+ for(const r of records){
+  const name=r.breweryName.trim(),prefecture=r.prefecture.trim();if(!name)continue;
+  const k=name+'|'+prefecture,v=map.get(k);
+  if(!v)map.set(k,{name,prefecture,municipality:r.municipality||'',address:r.breweryAddress||'',count:0});
+  else{if(!v.municipality&&r.municipality)v.municipality=r.municipality;if(!v.address&&r.breweryAddress)v.address=r.breweryAddress;}
+ }
+ return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'ja')||a.prefecture.localeCompare(b.prefecture,'ja'));
 }
 export async function loadBrands(): Promise<Brand[]> {
   const response = await fetch(import.meta.env.BASE_URL + 'sakenowa-brands.json');

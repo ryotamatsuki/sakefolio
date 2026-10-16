@@ -4,6 +4,8 @@ export interface Brand {
   breweryName: string;
   prefecture: string;
   breweryId?: string;
+  municipality?: string;
+  breweryAddress?: string;
 }
 export interface RecordEntry {
   reviewId: string;
