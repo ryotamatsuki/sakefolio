@@ -5,10 +5,12 @@ import {
   ExternalLink, FolderHeart, Leaf, LogIn, LogOut, MapPin,
   Plus, Search, ShieldCheck, Star, Wine, X
 } from 'lucide-react';
+import type { SaveAttempt } from './google';
+import { validateRecordInput } from './security';
 import type { Brand, RecordEntry, StorageInfo } from './types';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
-import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord } from './google';
+import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
 
 type Tab = 'home' | 'explore' | 'record' | 'places';
 function todayLocal(): string {
@@ -26,19 +28,22 @@ function emptyEntry(): RecordEntry {
 }
 function Photo({ token, photoId, alt }: { token: string; photoId: string; alt: string }) {
   const [url, setUrl] = useState('');
+  const [error,setError] = useState('');
+  const [retry,setRetry] = useState(0);
   useEffect(() => {
     let active = true;
     let objectUrl = '';
+    setUrl('');setError('');
     if (token && photoId) {
       getPhotoBlob(token, photoId).then(blob => {
         objectUrl = URL.createObjectURL(blob);
         if (active) setUrl(objectUrl);
         else URL.revokeObjectURL(objectUrl);
-      }).catch(() => { if (active) setUrl(''); });
+      }).catch(error => { if (active) setError(error instanceof Error ? error.message : '写真の通信エラー。'); });
     }
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [token, photoId]);
-  return url ? <img className="record-photo" src={url} alt={alt} loading="lazy" /> : <div className="photo-fallback"><Wine size={30} strokeWidth={1.3}/></div>;
+  }, [token, photoId,retry]);
+  return url ? <img className="record-photo" src={url} alt={alt} loading="lazy" onError={()=>{setUrl('');setError('画像形式を展開できません。JPEG・PNGで再登録してください。');}} /> : <div className="photo-fallback"><Wine size={30} strokeWidth={1.3}/>{error && <div role="alert">{error}<button type="button" onClick={()=>setRetry(v=>v+1)}>写真を再取得</button></div>}</div>;
 }
 function SectionEyebrow({ children }: { children: ReactNode }) {
   return <div className="eyebrow"><span className="eyebrow-line"/>{children}</div>;
@@ -58,6 +63,10 @@ export default function App() {
   const [entry, setEntry] = useState<RecordEntry>(emptyEntry);
   const [photo, setPhoto] = useState<File | null>(null);
   const [preview, setPreview] = useState('');
+  const [selectedPhoto,setSelectedPhoto] = useState<File | null>(null);
+  const [photoBusy,setPhotoBusy] = useState(false);
+  const [photoError,setPhotoError] = useState('');
+  const pendingSave = useRef<{entry:RecordEntry;photo:File|null;attempt:SaveAttempt;email:string} | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Invalidates outstanding requests before a disconnect or another connection.
@@ -71,27 +80,31 @@ export default function App() {
   useEffect(() => {
     let active = true;
     let url = '';
-    setPreview('');
-    if (photo) createPhotoPreview(photo).then(blob => {
+    setPreview('');setPhoto(null);setPhotoError('');setPhotoBusy(!!selectedPhoto);
+    if (selectedPhoto) createPhotoPreview(selectedPhoto).then(blob => {
       if (!active) return;
       url = URL.createObjectURL(blob);
-      setPreview(url);
-    }).catch(() => {
-      if (active) setMessage('写真のプレビューを作成できません。画像形式・サイズを確認してください。');
-    });
+      setPreview(url);setPhoto(new File([blob],'label.png',{type:'image/png'}));
+    }).catch(error => {
+      if (active) setPhotoError(error instanceof Error ? error.message : '写真を変換できません。');
+    }).finally(()=>{if(active)setPhotoBusy(false);});
     return () => { active = false; if (url) URL.revokeObjectURL(url); };
-  }, [photo]);
+  }, [selectedPhoto]);
 
   const connect = async () => {
     if (operation.current) return;
     operation.current = true;
     const current = ++session.current;
+    const previousEmail = accountEmail;
     setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
-    setPhoto(null);setEntry(emptyEntry());
     setBusy(true); setMessage('');
     try {
       const accessToken = await requestGoogleAccess();
       const account = await getDriveAccount(accessToken);
+      if (pendingSave.current && pendingSave.current.email !== account.emailAddress) {
+        setMessage('未完了の保存があります。同じGoogleアカウントで再接続してください。');return;
+      }
+      if (previousEmail && previousEmail !== account.emailAddress) {setEntry(emptyEntry());setSelectedPhoto(null);}
       const myStorage = await ensureStorage(accessToken);
       const [saved, added] = await Promise.all([
         loadRecords(accessToken, myStorage),loadManualBrands(accessToken,myStorage)
@@ -99,13 +112,15 @@ export default function App() {
       if (session.current !== current) return;
       setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);
       setAccountEmail(account.emailAddress);
-      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。');
+      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
     } catch (error) {
       if (session.current !== current) return;
       setMessage(error instanceof Error ? error.message : '接続に失敗しました。');
     } finally { operation.current = false; setBusy(false); }
   };
   const disconnect = () => {
+    if (operation.current) return;
+    pendingSave.current = null;setSelectedPhoto(null);
     ++session.current;
     if (token) revokeAccess(token);
     setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
@@ -113,6 +128,7 @@ export default function App() {
   };
   const update = (field: keyof RecordEntry, value: string) => setEntry(e => ({...e, [field]:value}));
   const setSelectedBrand = (brand: Brand) => {
+    if (pendingSave.current) {setTab('record');setMessage('未完了の記録を先に再確認・再開してください。');return;}
     setEntry(e => ({...e,brandId:brand.brandId,brandName:brand.brandName,
       breweryName:brand.breweryName,prefecture:brand.prefecture,
       municipality:'',breweryAddress:''}));
@@ -128,21 +144,26 @@ export default function App() {
     if (entry.sakeType === 'その他（自由記入）' && !entry.sakeTypeOther.trim()) {
       setMessage('「その他」を選んだ場合は種類名を記入してください。');return;
     }
+    if (photoBusy || photoError) {setMessage('写真の確認が終わるまで保存できません。写真を選び直すか取り消してください。');return;}
+    try {validateRecordInput(entry);} catch(error) {setMessage(error instanceof Error?error.message:'入力内容を確認してください。');return;}
+    const pending = pendingSave.current ||= {entry:{...entry},photo,attempt:{reviewId:crypto.randomUUID()},email:accountEmail};
     operation.current = true;
     const current = session.current;
     setBusy(true);setMessage('');
     try {
-      await saveRecord(token,storage,entry,brands,photo);
+      const reviewId = await saveRecord(token,storage,pending.entry,brands,pending.photo,pending.attempt);
       if (session.current !== current) return;
       const [saved, added] = await Promise.all([loadRecords(token,storage),loadManualBrands(token,storage)]);
       if (session.current !== current) return;
-      setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);
+      if (!saved.some(record=>record.reviewId===reviewId)) throw new Error('保存後の一覧に記録が見つかりません。同じ画面から再確認してください。');
+      pendingSave.current = null;
+      setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);setSelectedPhoto(null);
       setShowAdvanced(false);setTab('home');
       setMessage('記録を保存しました。Google SheetsとDriveで確認できます。');
       window.scrollTo({top:0,behavior:'smooth'});
     } catch (error) {
       if (session.current !== current) return;
-      setMessage(error instanceof Error ? error.message : '記録の保存に失敗しました。');
+      setMessage((error instanceof Error ? error.message : '記録の保存に失敗しました。')+' 入力内容を保持しています。認証期限切れの場合は右上から再接続し、同じ保存ボタンを押してください。');
     } finally {operation.current = false;setBusy(false);}
   };
   const filteredBrands = useMemo(() => {
@@ -199,7 +220,14 @@ export default function App() {
           <div className="account-info"><ShieldCheck size={18}/><span>{accountEmail}<br/>このGoogleアカウントのDriveに保存中</span></div>
           {storage && <a href={'https://drive.google.com/drive/folders/'+storage.folderId}
             target="_blank" rel="noopener noreferrer">保存フォルダを開く <ExternalLink size={14}/></a>}
-          <button type="button" onClick={disconnect}><LogOut size={15}/>接続を解除</button>
+          <button type="button" disabled={busy} onClick={connect}>Googleに再接続</button>
+          <button type="button" disabled={busy} onClick={async()=>{
+            if(operation.current || !storage)return;
+            operation.current=true;setBusy(true);
+            try{setMessage(await inspectStorage(token,storage));}catch(error){setMessage(error instanceof Error?error.message:'保存先を確認できません。');}
+            finally{operation.current=false;setBusy(false);}
+          }}>保存先の整合性を確認</button>
+          <button type="button" disabled={busy} onClick={disconnect}><LogOut size={15}/>接続を解除</button>
         </div>}
       </div>
     </header>
@@ -296,7 +324,7 @@ export default function App() {
             </div><ArrowRight className="brand-tile-arrow" size={18}/></button>)}
         </div>
         {!filteredBrands.length && <div className="empty-state compact"><h3>該当する銘柄がありません</h3><p>検索条件を変えるか、手入力で新規登録してください。</p></div>}
-        <button type="button" className="button button-dark extra-action" onClick={()=>{setEntry(emptyEntry());goto('record');}}>掲載されていない日本酒を記録 <Plus size={17}/></button>
+        <button type="button" className="button button-dark extra-action" onClick={()=>{if(!pendingSave.current)setEntry(emptyEntry());goto('record');}}>掲載されていない日本酒を記録 <Plus size={17}/></button>
       </section>}
 
       {tab==='record' && <section className="page-section interior-section form-layout">
@@ -305,6 +333,7 @@ export default function App() {
           <p>酒蔵・銘柄・商品・味わいをそれぞれ分けて保存します。分からない項目は空白のままで構いません。</p>
         </div>
         <form onSubmit={save} className="record-form">
+          <fieldset disabled={busy || !!pendingSave.current} className="record-fields">
           <div className="form-block">
             <div className="form-step"><span>01</span><div><h2>どこのお酒？</h2><p>酒蔵と銘柄、産地を記録しましょう。</p></div></div>
             <div className="form-fields">
@@ -375,10 +404,12 @@ export default function App() {
               <label className={'upload-zone '+(preview?'with-photo':'')}>
                 {preview ? <img src={preview} alt="選択した写真のプレビュー"/> : <><Camera size={30} strokeWidth={1.5}/><strong>ラベルの写真を追加</strong>
                 <small>タップして撮影、またはライブラリから選択（10MBまで）</small></>}
-                <input type="file" accept="image/*" onChange={e=>setPhoto(e.target.files?.[0]||null)}
+                <input type="file" accept="image/*" onChange={e=>setSelectedPhoto(e.target.files?.[0]||null)}
                   aria-label="日本酒ラベル写真を選ぶ"/>
               </label>
-              {preview && <button className="remove-photo" type="button" onClick={()=>setPhoto(null)}>写真を取り消す <X size={15}/></button>}
+              {selectedPhoto && <button className="remove-photo" type="button" onClick={()=>setSelectedPhoto(null)}>写真を取り消す <X size={15}/></button>}
+              {photoBusy && <p role="status">写真を確認・変換しています…</p>}
+              {photoError && <p role="alert">{photoError}</p>}
               <div className="field-grid two">
                 <label>飲んだ日 <span className="required">必須</span>
                   <input type="date" required value={entry.drinkingDate} onChange={e=>update('drinkingDate',e.target.value)}/></label>
@@ -395,11 +426,12 @@ export default function App() {
                   placeholder="香り、口当たり、一緒に食べたもの、その日の思い出など"/></label>
             </div>
           </div>
+          </fieldset>
           <div className="save-area">
             <div className="save-security"><ShieldCheck size={19}/>
               <span>{token ? accountEmail+' のGoogle Drive / Sheetsに保存します。' : 'Google接続後に、ご本人のDriveへ保存します。'}</span></div>
-            {token ? <button disabled={busy} type="submit" className="button button-dark button-save">
-              {busy?'保存しています…':'この一杯を記録する'} <ArrowRight size={19}/></button>
+            {token ? <button disabled={busy||photoBusy||!!photoError} type="submit" className="button button-dark button-save">
+              {busy?'保存・再取得を確認しています…':pendingSave.current?'同じ記録の保存を再確認・再開':'この一杯を記録する'} <ArrowRight size={19}/></button>
               : <button disabled={busy||!GOOGLE_CLIENT_ID} type="button" onClick={connect} className="button button-dark button-save">
                 <LogIn size={18}/> Googleに接続してから保存</button>}
           </div>

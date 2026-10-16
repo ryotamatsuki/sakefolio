@@ -1,21 +1,44 @@
-import { verifyPhoto } from './security';
+import { verifyPhoto, MAX_PHOTO_BYTES } from './security';
 
-/** Preview only decoder-produced pixels; never render an arbitrary uploaded document. */
+/** Decode verified raster input, then persist the same portable pixels shown in preview. */
 export async function createPhotoPreview(file: File): Promise<Blob> {
   await verifyPhoto(file);
-  const bitmap = await createImageBitmap(file);
+  let source: CanvasImageSource;
+  let width: number;
+  let height: number;
+  let close = () => {};
   try {
-    if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 40_000_000)
-      throw new Error('プレビューできる画像サイズを超えています。');
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const bitmap = await createImageBitmap(file);
+    source = bitmap; width = bitmap.width; height = bitmap.height;
+    close = () => bitmap.close();
+  } catch {
+    // Safari may decode HEIC in <img> but not in createImageBitmap.
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      source = image; width = image.naturalWidth; height = image.naturalHeight;
+      close = () => URL.revokeObjectURL(url);
+    } catch {
+      URL.revokeObjectURL(url);
+      throw new Error('このブラウザで写真を展開できません。JPEGまたはPNGにして選び直してください。');
+    }
+  }
+  try {
+    if (!width || !height || width * height > 40_000_000)
+      throw new Error('写真は4000万画素以下を選んでください。');
+    const scale = Math.min(1, 1600 / Math.max(width,height));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
     const context = canvas.getContext('2d');
     if (!context) throw new Error('写真のプレビューを作成できません。');
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    return await new Promise<Blob>((resolve,reject) => {
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve,reject) => {
       canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('写真を変換できません。')), 'image/png');
     });
-  } finally { bitmap.close(); }
+    if (blob.size > MAX_PHOTO_BYTES) throw new Error('変換後の写真が10MBを超えています。小さい写真を選んでください。');
+    return blob;
+  } finally { close(); }
 }

@@ -17,21 +17,22 @@ const TABLE_HEADERS: Record<string, string[]> = {
   Wishlist: ['wishlistId','brandId','bottleId','wishNote','priority','status','addedAt','updatedAt']
 };
 
-function extractError(json: unknown, status: number): Error {
-  const body = json as { error?: { message?: string } } | undefined;
+function extractError(_json: unknown, status: number): Error {
   if (status === 401) return new Error('Google認証の有効期限が切れました。再度接続してください。');
   if (status === 403) return new Error('権限が不足しています。Google CloudのDrive API・Sheets APIと認可設定を確認してください。');
-  return new Error(body?.error?.message || 'Google APIエラー (HTTP ' + status + ')');
+  if (status === 404) return new Error('ファイルが存在しないか、このアカウントから参照できません (HTTP 404)。');
+  return new Error('Google APIエラー (HTTP ' + status + ')。通信を確認して再試行してください。');
 }
 async function api<T>(token: string, url: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    signal: init.signal || AbortSignal.timeout(45000),
     headers: {
       'Authorization': 'Bearer ' + token,
       ...(init.body && !(init.body instanceof Blob) ? {'Content-Type': 'application/json'} : {}),
       ...(init.headers || {})
     }
-  });
+  }).catch(() => { throw new Error('通信エラー。接続を確認して再試行してください。'); });
   if (!response.ok) {
     const body = await response.json().catch(() => undefined);
     throw extractError(body, response.status);
@@ -193,12 +194,13 @@ export async function loadManualBrands(token: string, storage: StorageInfo): Pro
     prefecture: String(row[headers.indexOf('prefecture')] || '')
   }));
 }
-export async function uploadPhoto(token: string, folderId: string, file: File): Promise<string> {
+export async function uploadPhoto(token: string, folderId: string, file: File, id?: string, reviewId?: string): Promise<string> {
   const verified = await verifyPhoto(file);
   const boundary = 'sakefolio_' + crypto.randomUUID().replace(/-/g,'');
   // Generated name and content type derive from verified magic bytes, not user input.
   const name = crypto.randomUUID() + '.' + verified.extension;
-  const photoMetadata = {name,parents:[folderId],description:'Sakefolio private label photo',...metadata('photo')};
+  const photoMetadata = {id,name,parents:[folderId],description:'Sakefolio private label photo',
+    appProperties:{...metadata('photo').appProperties,...(reviewId ? {reviewId} : {})}};
   const delimiter = '\r\n--' + boundary + '\r\n';
   const body = new Blob([
     '--' + boundary + '\r\n',
@@ -218,62 +220,144 @@ export async function uploadPhoto(token: string, folderId: string, file: File): 
 }
 export async function getPhotoBlob(token: string, id: string): Promise<Blob> {
   const response = await fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?alt=media',
-    {headers: {Authorization:'Bearer ' + token}});
-  if (!response.ok) throw new Error('写真の読み込みに失敗しました。');
+    {signal:AbortSignal.timeout(45000),headers: {Authorization:'Bearer ' + token}}).catch(() => { throw new Error('写真の通信エラー。接続を確認してください。'); });
+  if (!response.ok) throw extractError(undefined,response.status);
   const blob = await response.blob();
   if (!blob.size || blob.size > 10 * 1024 * 1024 || !detectPhotoType(new Uint8Array(await blob.slice(0,32).arrayBuffer())))
     throw new Error('保存された写真が未対応の形式です。');
   return blob;
 }
+export interface SaveAttempt {
+  reviewId: string;
+  brandId?: string;
+  photoFileId?: string;
+  startedAt?: string;
+}
+const activeSaves = new Set<string>();
+
+/** Read before append: a retry reconciles an uncertain response instead of repeating a write.
+ * Conflicting rows are never overwritten. This is not a distributed transaction/lock.
+ */
+async function ensureRow(token: string, storage: StorageInfo, table: string, fields: Record<string,string>): Promise<void> {
+  const rows = await getRows(token,storage.spreadsheetId,table);
+  const key = TABLE_HEADERS[table][0];
+  const matches = rows.slice(1).filter(row => row[0] === fields[key]);
+  if (matches.length > 1) throw new Error(table+'に同じIDが複数あります。自動変更せず確認してください。');
+  if (matches.length) {
+    if (TABLE_HEADERS[table].some((name,index) => String(matches[0][index] || '') !== (fields[name] || '')))
+      throw new Error(table+'の保存済み内容と一致しません。データ保護のため停止しました。');
+    return;
+  }
+  await appendRow(token,storage.spreadsheetId,table,fields);
+  const confirmed = (await getRows(token,storage.spreadsheetId,table)).slice(1).filter(row=>row[0]===fields[key]);
+  if (confirmed.length !== 1 || TABLE_HEADERS[table].some((name,index)=>String(confirmed[0][index] || '') !== (fields[name] || '')))
+    throw new Error(table+'への書き込み結果を確認できません。');
+}
 export async function saveRecord(
-  token: string, storage: StorageInfo, entry: RecordEntry, knownBrands: Brand[], photo: File | null
-): Promise<void> {
-  validateRecordInput(entry);
-  if (photo) await verifyPhoto(photo); // Before creating any rows or uploading data.
-  // Recheck on every save: the owner may edit Sheets after connecting.
-  for (const table of ['Brands','Bottles','Reviews','Photos']) {
-    const current = (await getRows(token,storage.spreadsheetId,table,'A1:AZ1'))[0] || [];
-    if (TABLE_HEADERS[table].some((name,index) => current[index] !== name))
-      throw new Error('保存先の「'+table+'」の列構造が変わっています。データ保護のため書き込みを中止しました。');
-  }
-  const now = new Date().toISOString();
-  let brandId = entry.brandId;
-  if (!brandId) {
-    const same = knownBrands.find(b => b.brandName === entry.brandName && b.breweryName === entry.breweryName);
-    brandId = same?.brandId || 'manual-' + crypto.randomUUID();
-  }
-  if (brandId.startsWith('manual-') && !knownBrands.some(b => b.brandId === brandId)) {
-    await appendRow(token,storage.spreadsheetId,'Brands',{
-      brandId,brandName:entry.brandName,breweryName:entry.breweryName,
-      prefecture:entry.prefecture,municipality:entry.municipality,
-      breweryAddress:entry.breweryAddress,source:'manual',createdAt:now,updatedAt:now
-    });
-  }
-  const bottleRows = await getRows(token,storage.spreadsheetId,'Bottles','A1:O');
-  const bottleHeader = bottleRows[0] || [];
-  const matches = bottleRows.slice(1).find(r =>
-    r[bottleHeader.indexOf('brandId')] === brandId &&
-    r[bottleHeader.indexOf('productName')] === (entry.productName || entry.brandName) &&
-    r[bottleHeader.indexOf('sakeType')] === entry.sakeType &&
-    r[bottleHeader.indexOf('sakeTypeOther')] === entry.sakeTypeOther &&
-    r[bottleHeader.indexOf('processingStyle')] === entry.processingStyles &&
-    r[bottleHeader.indexOf('heatTreatment')] === entry.heatTreatment
-  );
-  const bottleId = matches?.[bottleHeader.indexOf('bottleId')] || crypto.randomUUID();
-  if (!matches) await appendRow(token,storage.spreadsheetId,'Bottles',{
-    bottleId,brandId,productName:entry.productName || entry.brandName,
-    sakeType:entry.sakeType,sakeTypeOther:entry.sakeTypeOther,
-    processingStyle:entry.processingStyles,brewingMethod:entry.brewingMethod,
-    heatTreatment:entry.heatTreatment,riceVariety:entry.riceVariety,
-    polishingRatio:entry.polishingRatio,alcoholPercent:entry.alcoholPercent,
-    vintage:entry.vintage,createdAt:now,updatedAt:now
-  });
-  const photoId = photo ? await uploadPhoto(token,storage.photoFolderId,photo) : '';
-  const reviewId = crypto.randomUUID();
-  if (photoId) await appendRow(token,storage.spreadsheetId,'Photos',{
-    photoId:crypto.randomUUID(),reviewId,imageFile:photoId,photoType:'表ラベル',capturedAt:now,aiStatus:'未解析'
-  });
-  await appendRow(token,storage.spreadsheetId,'Reviews',{
-    ...entry,reviewId,brandId,bottleId,photoId,comment:entry.notes,createdAt:now,updatedAt:now
-  });
+  token: string, storage: StorageInfo, entry: RecordEntry, knownBrands: Brand[], photo: File | null,
+  attempt: SaveAttempt = {reviewId: crypto.randomUUID()}
+): Promise<string> {
+  const key = storage.spreadsheetId+':'+attempt.reviewId;
+  if (activeSaves.has(key)) throw new Error('この記録は保存処理中です。');
+  activeSaves.add(key);
+  let stage = '入力確認';
+  try {
+    validateRecordInput(entry);
+    if (photo) await verifyPhoto(photo);
+    stage = '保存先の列確認';
+    for (const table of ['Brands','Bottles','Reviews','Photos']) {
+      const current = (await getRows(token,storage.spreadsheetId,table,'A1:AZ1'))[0] || [];
+      if (TABLE_HEADERS[table].some((name,index) => current[index] !== name))
+        throw new Error('保存先の「'+table+'」の列構造が変わっています。データ保護のため書き込みを中止しました。');
+    }
+    const now = attempt.startedAt ||= new Date().toISOString();
+    const brandId = attempt.brandId ||= entry.brandId ||
+      knownBrands.find(b => b.brandName === entry.brandName && b.breweryName === entry.breweryName)?.brandId ||
+      'manual-'+attempt.reviewId;
+    stage = '銘柄保存';
+    if (brandId.startsWith('manual-') && !knownBrands.some(b => b.brandId === brandId)) {
+      await ensureRow(token,storage,'Brands',{
+        brandId,brandName:entry.brandName,breweryName:entry.breweryName,
+        prefecture:entry.prefecture,municipality:entry.municipality,
+        breweryAddress:entry.breweryAddress,source:'manual',createdAt:now,updatedAt:now
+      });
+    }
+    // An immutable product snapshot per review also avoids conflating different brewing methods.
+    const bottleId = attempt.reviewId+'-bottle';
+    stage = '商品保存';
+    const bottle = {bottleId,brandId,productName:entry.productName || entry.brandName,
+      sakeType:entry.sakeType,sakeTypeOther:entry.sakeTypeOther,
+      processingStyle:entry.processingStyles,brewingMethod:entry.brewingMethod,
+      heatTreatment:entry.heatTreatment,riceVariety:entry.riceVariety,
+      polishingRatio:entry.polishingRatio,alcoholPercent:entry.alcoholPercent,
+      vintage:entry.vintage,createdAt:now,updatedAt:now};
+    await ensureRow(token,storage,'Bottles',bottle);
+    let photoId = '';
+    if (photo) {
+      stage = '写真IDの予約';
+      if (!attempt.photoFileId) {
+        const reserved = await api<{ids:string[]}>(token,'https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files');
+        if (!reserved.ids?.[0]) throw new Error('写真IDを予約できませんでした。');
+        attempt.photoFileId = reserved.ids[0];
+      }
+      photoId = attempt.photoFileId;
+      stage = '写真アップロード';
+      // Only an explicit 404 permits creating the reserved ID; auth/network errors stop safely.
+      const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(photoId)+'?fields=id,parents,appProperties';
+      const response = await fetch(url,{signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}})
+        .catch(() => { throw new Error('写真確認中の通信エラー。再試行してください。'); });
+      if (response.status === 404) await uploadPhoto(token,storage.photoFolderId,photo,photoId,attempt.reviewId);
+      else {
+        if (!response.ok) throw extractError(undefined,response.status);
+        const found = await response.json() as {parents?:string[];appProperties?:Record<string,string>};
+        if (!found.parents?.includes(storage.photoFolderId) || found.appProperties?.reviewId !== attempt.reviewId)
+          throw new Error('写真の保存先または記録IDが一致しません。');
+      }
+      stage = '写真の再取得確認';
+      await getPhotoBlob(token,photoId);
+      stage = '写真情報保存';
+      await ensureRow(token,storage,'Photos',{
+        photoId:attempt.reviewId+'-photo',reviewId:attempt.reviewId,imageFile:photoId,
+        photoType:'表ラベル',capturedAt:now,aiStatus:'未解析'
+      });
+    }
+    const review = {...entry,reviewId:attempt.reviewId,brandId,bottleId,photoId,comment:entry.notes,createdAt:now,updatedAt:now};
+    stage = '飲酒記録保存';
+    await ensureRow(token,storage,'Reviews',review);
+    stage = '書き込み結果の再取得確認';
+    for (const [table,fields] of [['Bottles',bottle],['Reviews',review]] as const) {
+      const rows = await getRows(token,storage.spreadsheetId,table);
+      const found = rows.slice(1).filter(row=>row[0] === fields[TABLE_HEADERS[table][0] as keyof typeof fields]);
+      if (found.length !== 1 || TABLE_HEADERS[table].some((name,index)=>String(found[0][index] || '') !== (fields[name as keyof typeof fields] || '')))
+        throw new Error(table+'への書き込み結果を確認できません。');
+    }
+    return attempt.reviewId;
+  } catch (error) {
+    // Do not include upstream response bodies, credentials, filenames or user text.
+    throw new Error(stage+'：'+(error instanceof Error ? error.message : '保存に失敗しました。')+
+      ' 完了は未確認です。同じ画面の保存ボタンで再確認・再開できます。');
+  } finally { activeSaves.delete(key); }
+}
+
+/** Read-only diagnostics. Never delete/overwrite existing data to repair a partial save. */
+export async function inspectStorage(token: string, storage: StorageInfo): Promise<string> {
+  const [reviews,photos,bottles] = await Promise.all(['Reviews','Photos','Bottles'].map(table=>getRows(token,storage.spreadsheetId,table)));
+  const reviewIds = new Set(reviews.slice(1).map(r=>r[0]).filter(Boolean));
+  const usedBottles = new Set(reviews.slice(1).map(r=>r[2]));
+  const photoLinks = photos.slice(1).filter(r=>r[0]);
+  const photoIds = new Set(photoLinks.map(r=>r[2]));
+  const files: {id:string}[] = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId.replace(/'/g,"\\'")+"' in parents",fields:'nextPageToken,files(id)',pageSize:'1000',...(pageToken ? {pageToken} : {})});
+    const page = await api<{files:{id:string}[];nextPageToken?:string}>(token,'https://www.googleapis.com/drive/v3/files?'+query);
+    files.push(...(page.files || []));pageToken = page.nextPageToken || '';
+  } while (pageToken);
+  const fileIds = new Set(files.map(f=>f.id));
+  const missing = photoLinks.filter(r=>!fileIds.has(r[2])).length;
+  const orphan = files.filter(f=>!photoIds.has(f.id)).length;
+  const incomplete = photoLinks.filter(r=>!reviewIds.has(r[1])).length;
+  const missingLinks = reviews.slice(1).filter(r=>r[31] && !photoLinks.some(p=>p[1]===r[0] && p[2]===r[31])).length;
+  const unusedBottles = bottles.slice(1).filter(r=>r[0] && !usedBottles.has(r[0])).length;
+  return '保存先確認：記録 '+reviewIds.size+'件、写真情報 '+photoLinks.length+'件。写真ファイル不足 '+missing+'件、未紐付け画像 '+orphan+'件、記録未完了の写真情報 '+incomplete+'件、写真情報不足 '+missingLinks+'件、未紐付け商品 '+unusedBottles+'件。データは変更していません。';
 }

@@ -222,3 +222,6 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 }
 @media(max-width:380px){.records-grid{grid-template-columns:1fr}.hero-buttons{flex-wrap:wrap}.logo-text{font-size:19px}.header-inner{padding:0 12px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:0.01ms!important;transition-duration:0.01ms!important;scroll-behavior:auto!important}}
+
+.record-fields{border:0;padding:0;margin:0;min-width:0}
+.photo-fallback [role=alert]{font-size:12px;padding:12px;overflow-wrap:anywhere}
