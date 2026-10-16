@@ -1,0 +1,47 @@
+name: Sakefolio address-level bulk geocoding
+
+on:
+  push:
+    branches: [test/sakefolio-pages-preview]
+    paths:
+      - ".github/workflows/sakefolio-geocode.yml"
+      - "web/scripts/geocode-breweries.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sakefolio-geocoding
+  cancel-in-progress: false
+
+jobs:
+  geocode:
+    if: github.repository == 'ryotamatsuki/sakefolio'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install address normalizer
+        run: npm install --no-save --package-lock=false --ignore-scripts @geolonia/normalize-japanese-addresses
+        working-directory: web
+      - name: Geocode with precision grading
+        run: node scripts/geocode-breweries.mjs
+        working-directory: web
+      - name: Commit only generated coordinate and QA datasets to preview branch
+        if: github.ref_name == 'test/sakefolio-pages-preview'
+        run: |
+          git config user.name "sakefolio-geocoding-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/public/brewery-coordinates.json web/data/brewery-geocoding-report.json
+          if git diff --cached --quiet; then
+            echo "No coordinate changes"
+          else
+            git commit -m "data: geocode breweries with Address Base Registry accuracy grades"
+            git push origin "HEAD:refs/heads/test/sakefolio-pages-preview"
+          fi
