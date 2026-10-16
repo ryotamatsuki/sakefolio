@@ -404,7 +404,7 @@ export default function App() {
               <label className={'upload-zone '+(preview?'with-photo':'')}>
                 {preview ? <img src={preview} alt="選択した写真のプレビュー"/> : <><Camera size={30} strokeWidth={1.5}/><strong>ラベルの写真を追加</strong>
                 <small>タップして撮影、またはライブラリから選択（10MBまで）</small></>}
-                <input type="file" accept="image/*" onChange={e=>setSelectedPhoto(e.target.files?.[0]||null)}
+                <input type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0]||null;setPhotoBusy(!!file);setPhoto(null);setPhotoError('');setSelectedPhoto(file);}}
                   aria-label="日本酒ラベル写真を選ぶ"/>
               </label>
               {selectedPhoto && <button className="remove-photo" type="button" onClick={()=>setSelectedPhoto(null)}>写真を取り消す <X size={15}/></button>}

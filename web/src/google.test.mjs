@@ -229,3 +229,12 @@ test('manual brand retry reconciles a committed row after losing its response',a
   await google.saveRecord('first',storage,manual,[],null,attempt);
   assert.equal(state.tables.Brands.length,2);assert.equal(state.tables.Reviews.length,2);
 });
+test('retry after successful persistence and failed UI refresh keeps exactly one review',async()=>{
+  const state=mockGoogle();const attempt={reviewId:'refresh-retry'};
+  await google.saveRecord('first',storage,record,[],null,attempt);
+  // UI refresh can fail after all mutations. Repeating the same attempt must be read-only.
+  const writes=state.writes.length;
+  await google.saveRecord('renewed',storage,record,[],null,attempt);
+  assert.equal(state.tables.Reviews.length,2);
+  assert.equal(state.writes.length,writes);
+});
