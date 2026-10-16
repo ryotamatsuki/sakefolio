@@ -21,16 +21,16 @@ const hav=(a,b,c,d)=>{const r=Math.PI/180,z=Math.sin((c-a)*r/2)**2+Math.cos(a*r)
 const osm=[];
 const queries=[];
 for(const [region,s,w,n,e] of regions){
- const q='[out:json][timeout:150][maxsize:70000000];(nwr["craft"="brewery"]('+s+','+w+','+n+','+e+');nwr["industrial"="brewery"]('+s+','+w+','+n+','+e+');nwr["name"~"酒造|酒蔵|醸造|清酒"]('+s+','+w+','+n+','+e+'););out center tags;';
- let elements=[],error=null;
- for(let attempt=0;attempt<2;attempt++){
+ const q='[out:json][timeout:150][maxsize:70000000];(nwr["craft"="brewery"]('+s+','+w+','+n+','+e+');nwr["industrial"="brewery"]('+s+','+w+','+n+','+e+'););out center tags;';
+ let elements=[],error=null,successful=false;
+ for(const endpoint of ['https://overpass.osm.jp/api/interpreter','https://overpass-api.de/api/interpreter','https://overpass.private.coffee/api/interpreter']){
   try{
-   const response=await fetch('https://overpass.kumi.systems/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':'SakefolioBreweryResearch/1.0 (https://github.com/ryotamatsuki/sakefolio)'},body:new URLSearchParams({data:q}),signal:AbortSignal.timeout(200000)});
+   const response=await fetch(''+endpoint+'',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':'SakefolioBreweryResearch/1.0 (https://github.com/ryotamatsuki/sakefolio)'},body:new URLSearchParams({data:q}),signal:AbortSignal.timeout(200000)});
    if(!response.ok)throw Error('HTTP '+response.status);
-   const data=await response.json();elements=data.elements||[];break;
-  }catch(e){error=String(e.message||e);await delay(20000);}
+   const data=await response.json();elements=data.elements||[];successful=true;error=null;break;
+  }catch(e){error=String(e.message||e);await delay(4000);}
  }
- queries.push({region,found:elements.length,error:elements.length?null:error});
+ queries.push({region,found:elements.length,error:successful?null:error});
  for(const x of elements){
   const point=latlon(x),t=x.tags||{};
   if(!valid(point.lat,point.lon))continue;
@@ -39,6 +39,7 @@ for(const [region,s,w,n,e] of regions){
  console.log('OSM_REGION '+region+' '+elements.length+' '+(error||'ok'));
  await delay(18000);
 }
+if(!queries.some(x=>x.error===null))throw Error('All Overpass requests failed; do not write an empty report');
 const dedup=[...new Map(osm.map(x=>[x.id,x])).values()];
 const out=[];
 for(const t of targets){
