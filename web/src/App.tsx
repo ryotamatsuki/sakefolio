@@ -10,6 +10,7 @@ import { validateRecordInput } from './security';
 import type { Brand, RecordEntry, StorageInfo } from './types';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
+import { AROMA_GROUPS, POPULAR_AROMA_IDS, SENSORY_AXES, TASTE_GROUPS, selectedIds, tagLabels, toggleIds } from './sensory';
 import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
 
 type Tab = 'home' | 'explore' | 'record' | 'places';
@@ -23,7 +24,7 @@ function emptyEntry(): RecordEntry {
     breweryAddress:'',productName:'',sakeType:'特定名称の表示なし・不明',sakeTypeOther:'',
     brewingMethod:'不明・記載なし',heatTreatment:'不明・記載なし',processingStyles:'',
     riceVariety:'',polishingRatio:'',alcoholPercent:'',vintage:'',
-    drinkingDate:todayLocal(),rating:'',notes:'',photoId:'',createdAt:''
+    drinkingDate:todayLocal(),rating:'',aromaTagIds:'',tasteTagIds:'',sweetDry:'',lightRich:'',acidity:'',umami:'',notes:'',photoId:'',createdAt:''
   };
 }
 function Photo({ token, photoId, alt }: { token: string; photoId: string; alt: string }) {
@@ -68,6 +69,8 @@ export default function App() {
   const [photoError,setPhotoError] = useState('');
   const pendingSave = useRef<{entry:RecordEntry;photo:File|null;attempt:SaveAttempt;email:string} | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAllAromas, setShowAllAromas] = useState(false);
+  const [aromaSearch, setAromaSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   // Invalidates outstanding requests before a disconnect or another connection.
   const session = useRef(0);
@@ -127,6 +130,8 @@ export default function App() {
     setPhoto(null);setEntry(emptyEntry());setMessage('接続を解除しました。');setMenuOpen(false);
   };
   const update = (field: keyof RecordEntry, value: string) => setEntry(e => ({...e, [field]:value}));
+  const toggleAroma = (id: string) => setEntry(e=>({...e, aromaTagIds:toggleIds(e.aromaTagIds,id)}));
+  const toggleTaste = (id: string) => setEntry(e=>({...e, tasteTagIds:toggleIds(e.tasteTagIds,id)}));
   const setSelectedBrand = (brand: Brand) => {
     if (pendingSave.current) {setTab('record');setMessage('未完了の記録を先に再確認・再開してください。');return;}
     setEntry(e => ({...e,brandId:brand.brandId,brandName:brand.brandName,
@@ -158,7 +163,7 @@ export default function App() {
       if (!saved.some(record=>record.reviewId===reviewId)) throw new Error('保存後の一覧に記録が見つかりません。同じ画面から再確認してください。');
       pendingSave.current = null;
       setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);setSelectedPhoto(null);
-      setShowAdvanced(false);setTab('home');
+      setShowAdvanced(false);setShowAllAromas(false);setAromaSearch('');setTab('home');
       setMessage('記録を保存しました。Google SheetsとDriveで確認できます。');
       window.scrollTo({top:0,behavior:'smooth'});
     } catch (error) {
@@ -284,6 +289,11 @@ export default function App() {
             <div className="record-card-body"><span className="record-date">{r.drinkingDate}</span>
               <h4>{r.brandName}</h4>
               <div className="record-type">{r.productName||r.sakeTypeOther||r.sakeType}</div>
+              {(r.aromaTagIds || r.tasteTagIds || SENSORY_AXES.some(a=>r[a.key])) && <div className="record-sensory">
+                {r.aromaTagIds && <span>香り：{tagLabels(r.aromaTagIds,'aroma').slice(0,3).join('・')}{selectedIds(r.aromaTagIds).length>3?'…':''}</span>}
+                {r.tasteTagIds && <span>味わい：{tagLabels(r.tasteTagIds,'taste').slice(0,3).join('・')}{selectedIds(r.tasteTagIds).length>3?'…':''}</span>}
+                {SENSORY_AXES.filter(a=>r[a.key]).map(a=><span key={a.key}>{a.title}：{a.options[Number(r[a.key])-1]||'未設定'}</span>)}
+              </div>}
               <div className="record-place"><MapPin size={13}/>{[r.prefecture,r.municipality].filter(Boolean).join(' · ') || '産地未登録'}</div>
               <p className="record-notes">{r.notes}</p>
               <a className="record-map-link" target="_blank" rel="noopener noreferrer"
@@ -421,7 +431,96 @@ export default function App() {
                   </div>
                 </label>
               </div>
-              <label>味わい・感想 <span className="optional">任意</span>
+
+              <div className="sensory-panel">
+                <div className="sensory-heading">
+                  <div><h3>味わいのバランス</h3><p>感じた印象をタップ。わからない項目は未選択でOK。</p></div>
+                </div>
+                <div className="sensory-axes">
+                  {SENSORY_AXES.map(axis=><div className="sensory-axis" key={axis.key}>
+                    <div className="sensory-axis-heading">
+                      <strong>{axis.title}</strong>
+                      <span>{entry[axis.key] ? axis.options[Number(entry[axis.key])-1] : '未選択'}</span>
+                    </div>
+                    <div className="sensory-segments" role="group" aria-label={axis.title}>
+                      {axis.options.map((option,index)=><button key={option} type="button"
+                        aria-label={axis.title+'：'+option} aria-pressed={entry[axis.key]===String(index+1)}
+                        className={entry[axis.key]===String(index+1)?'active':''}
+                        onClick={()=>update(axis.key,entry[axis.key]===String(index+1)?'':String(index+1))}>
+                        <span>{index+1}</span><small>{option}</small>
+                      </button>)}
+                    </div>
+                  </div>)}
+                </div>
+                <p className="sensory-explainer">甘辛は主観的な味の印象です。日本酒度を自動判定するものではありません。選択中の項目をもう一度タップすると解除できます。</p>
+              </div>
+
+              <div className="sensory-panel">
+                <div className="sensory-heading">
+                  <div><h3>どんな香り？</h3><p>果物だけでなく、米・麹・乳酸・熟成の香りまで選べます。</p></div>
+                  <span className="sensory-count">{selectedIds(entry.aromaTagIds).length}件選択</span>
+                </div>
+                <div className="sensory-subheading">よく使う香り</div>
+                <div className="sensory-chip-list" role="group" aria-label="よく使う日本酒の香り">
+                  {POPULAR_AROMA_IDS.map(id=>{
+                    const label = AROMA_GROUPS.flatMap(g=>g.terms).find(t=>t.id===id)?.label || id;
+                    const active = selectedIds(entry.aromaTagIds).includes(id);
+                    return <button key={id} type="button" className={'sensory-chip '+(active?'active':'')}
+                      aria-pressed={active} onClick={()=>toggleAroma(id)}>{active && <Check size={14}/>} {label}</button>;
+                  })}
+                </div>
+                <button className="sensory-expand" type="button" aria-expanded={showAllAromas}
+                  aria-controls="aroma-catalog" onClick={()=>setShowAllAromas(v=>!v)}>
+                  {showAllAromas?'香りの一覧を閉じる':'香りをもっと探す（分類別）'}
+                  <ChevronDown size={16} className={showAllAromas?'rotated':''}/>
+                </button>
+                {showAllAromas && <div id="aroma-catalog" className="aroma-catalog">
+                  <label className="sensory-search">香りを検索
+                    <input type="search" value={aromaSearch} onChange={e=>setAromaSearch(e.target.value)}
+                      placeholder="例：洋梨、麹、ヨーグルト"/>
+                  </label>
+                  {AROMA_GROUPS.map(group=>{
+                    const matched = group.terms.filter(term=>term.label.includes(aromaSearch.trim()) || term.id.includes(aromaSearch.trim().toLowerCase()));
+                    return matched.length ? <div className="aroma-category" key={group.title}>
+                      <h4>{group.title}</h4>
+                      <p>{group.hint}</p>
+                      <div className="sensory-chip-list">
+                        {matched.map(term=>{
+                          const active = selectedIds(entry.aromaTagIds).includes(term.id);
+                          return <button type="button" key={term.id} className={'sensory-chip '+(active?'active':'')}
+                            aria-pressed={active} onClick={()=>toggleAroma(term.id)}>
+                            {active && <Check size={14}/>} {term.label}
+                          </button>;
+                        })}
+                      </div>
+                    </div> : null;
+                  })}
+                  {!AROMA_GROUPS.some(g=>g.terms.some(t=>t.label.includes(aromaSearch.trim()) || t.id.includes(aromaSearch.trim().toLowerCase()))) &&
+                    <p className="sensory-no-results">一致する香りがありません。自由メモに記入できます。</p>}
+                </div>}
+                {!!entry.aromaTagIds && <div className="sensory-summary"><strong>選んだ香り</strong><span>{tagLabels(entry.aromaTagIds,'aroma').join(' ／ ')}</span></div>}
+                <p className="sensory-explainer">香りの表現は「〜のような香り」という比喩です。実際に果物や乳製品が入っている意味ではありません。</p>
+              </div>
+
+              <div className="sensory-panel">
+                <div className="sensory-heading">
+                  <div><h3>味わい・口当たりの特徴</h3><p>印象に残った言葉をいくつでも選べます。</p></div>
+                  <span className="sensory-count">{selectedIds(entry.tasteTagIds).length}件選択</span>
+                </div>
+                {TASTE_GROUPS.map(group=><div key={group.title} className="taste-category">
+                  <div className="sensory-subheading">{group.title}</div>
+                  <div className="sensory-chip-list" role="group" aria-label={group.title}>
+                    {group.terms.map(term=>{
+                      const active = selectedIds(entry.tasteTagIds).includes(term.id);
+                      return <button key={term.id} type="button" className={'sensory-chip '+(active?'active':'')}
+                        aria-pressed={active} onClick={()=>toggleTaste(term.id)}>
+                        {active && <Check size={14}/>} {term.label}
+                      </button>;
+                    })}
+                  </div>
+                </div>)}
+              </div>
+              <label>自由メモ・感想 <span className="optional">任意</span>
                 <textarea rows={4} value={entry.notes} onChange={e=>update('notes',e.target.value)}
                   placeholder="香り、口当たり、一緒に食べたもの、その日の思い出など"/></label>
             </div>

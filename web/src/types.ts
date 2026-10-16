@@ -25,6 +25,12 @@ export interface RecordEntry {
   vintage: string;
   drinkingDate: string;
   rating: string;
+  aromaTagIds: string;
+  tasteTagIds: string;
+  sweetDry: string;
+  lightRich: string;
+  acidity: string;
+  umami: string;
   notes: string;
   photoId: string;
   createdAt: string;

@@ -71,7 +71,7 @@ const headerSource = source.slice(source.indexOf('const TABLE_HEADERS'),source.i
 const headers = Function(headerSource.replace(': Record<string, string[]>','')+';return TABLE_HEADERS;')();
 const storage = {spreadsheetId:'test-sheet',folderId:'test-root',photoFolderId:'test-photos'};
 const record = Object.fromEntries(headers.Reviews.map(k=>[k,'']));
-Object.assign(record,{brandId:'sw-1',brandName:'石鎚',breweryName:'石鎚酒造',drinkingDate:'2026-10-16',rating:'4',notes:'=1+2',sakeType:'純米酒'});
+Object.assign(record,{brandId:'sw-1',brandName:'石鎚',breweryName:'石鎚酒造',drinkingDate:'2026-10-16',rating:'4',notes:'=1+2',sakeType:'純米酒',aromaTagIds:'aroma_apple,aroma_koji',tasteTagIds:'taste_smooth,taste_rice_umami',sweetDry:'4',lightRich:'3',acidity:'2',umami:'5'});
 const imageBytes = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,0]);
 const image = new File([imageBytes],'label.png',{type:'image/png'});
 function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false}={}) {
@@ -124,6 +124,12 @@ test('empty collection and save without photo roundtrip using a new token',async
   assert.equal(state.tables.Photos.length,1);
   const saved=await google.loadRecords('relogin',storage);
   assert.equal(saved[0].notes,'=1+2');
+  assert.equal(saved[0].aromaTagIds,'aroma_apple,aroma_koji');
+  assert.equal(saved[0].tasteTagIds,'taste_smooth,taste_rice_umami');
+  assert.equal(saved[0].sweetDry,'4');
+  assert.equal(saved[0].lightRich,'3');
+  assert.equal(saved[0].acidity,'2');
+  assert.equal(saved[0].umami,'5');
   assert.equal(saved[0].photoId,'');
 });
 test('photo save links Reviews, Photos and private Drive; new login can retrieve bytes',async()=>{

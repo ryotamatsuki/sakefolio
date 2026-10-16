@@ -225,3 +225,48 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 
 .record-fields{border:0;padding:0;margin:0;min-width:0}
 .photo-fallback [role=alert]{font-size:12px;padding:12px;overflow-wrap:anywhere}
+
+
+/* Sensory capture: compact, touch-friendly structured sake tasting vocabulary */
+.sensory-panel{background:#fafbf7;border:1px solid #e3eade;border-radius:15px;padding:23px;margin-top:7px}
+.sensory-heading{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
+.sensory-heading h3{font-family:'Noto Serif JP',serif;color:#264530;font-size:19px;font-weight:650;margin-bottom:6px}
+.sensory-heading p{color:#768b7b;font-size:12px;line-height:1.7}
+.sensory-count{white-space:nowrap;flex-shrink:0;color:#2d623a;font-size:11px;font-weight:700;background:#e5eee3;border-radius:15px;padding:6px 9px}
+.sensory-axes{display:grid;gap:17px}
+.sensory-axis-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.sensory-axis-heading strong{font-size:13px;color:#2d4434}
+.sensory-axis-heading>span{font-size:12px;color:#326c40;font-weight:700}
+.sensory-segments{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}
+.sensory-segments button{border:1px solid #dce5d9;border-radius:9px;background:#fff;min-width:0;min-height:62px;padding:7px 2px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#718674;touch-action:manipulation}
+.sensory-segments button span{font-size:12px;font-weight:750}
+.sensory-segments button small{font-size:10px;line-height:1.25;text-align:center;overflow-wrap:anywhere}
+.sensory-segments button.active,.sensory-chip.active{color:#fff;background:#28563a;border-color:#28563a}
+.sensory-segments button:focus-visible,.sensory-chip:focus-visible,.sensory-expand:focus-visible{outline:3px solid #8aa985;outline-offset:2px}
+.sensory-explainer{margin-top:16px;font-size:11px;line-height:1.75;color:#7c907f}
+.sensory-subheading{font-weight:700;color:#526f58;font-size:12px;margin:0 0 11px}
+.sensory-chip-list{display:flex;flex-wrap:wrap;gap:8px}
+.sensory-chip{min-height:40px;border-radius:24px;border:1px solid #cadacb;color:#395943;background:#fff;font-size:12px;padding:9px 13px;display:inline-flex;align-items:center;gap:5px;touch-action:manipulation}
+.sensory-expand{display:flex;gap:8px;align-items:center;margin-top:18px;padding:10px 0;border:0;background:none;color:#2c643c;font-size:12px;font-weight:750}
+.sensory-expand .rotated{transform:rotate(180deg)}
+.aroma-catalog{border-top:1px solid #e1e8df;margin-top:8px;padding-top:17px}
+.sensory-search{font-size:12px;font-weight:700;color:#516a56;display:block;margin-bottom:14px}
+.sensory-search input{margin-top:8px}
+.aroma-category{margin-top:19px}
+.aroma-category h4{font-size:14px;font-weight:750;color:#264b32;margin-bottom:5px}
+.aroma-category>p{font-size:11px;color:#829487;margin-bottom:10px;line-height:1.65}
+.sensory-no-results{font-size:12px;color:#708472}
+.sensory-summary{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px;background:#ebf1e9;padding:12px;border-radius:9px;font-size:12px;line-height:1.7;color:#365743}
+.sensory-summary strong{white-space:nowrap;color:#254c30}
+.taste-category+.taste-category{margin-top:20px}
+.record-sensory{margin-top:12px;display:flex;flex-wrap:wrap;gap:5px}
+.record-sensory span{display:inline-block;font-size:10px;color:#4c7055;background:#eff4eb;border-radius:6px;padding:5px 7px;line-height:1.5}
+@media(max-width:760px){
+ .sensory-panel{padding:15px 12px;border-radius:12px}
+ .sensory-heading h3{font-size:17px}
+ .sensory-heading p{font-size:11px}
+ .sensory-segments{gap:3px}
+ .sensory-segments button{min-height:57px}
+ .sensory-segments button small{font-size:9px}
+ .sensory-chip{font-size:12px;min-height:43px;padding:10px 12px}
+}
