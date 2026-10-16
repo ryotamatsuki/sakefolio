@@ -1,0 +1,66 @@
+name: Sakefolio preview deployment test
+
+on:
+  push:
+    branches:
+      - test/sakefolio-pages-preview
+    paths:
+      - ".github/workflows/sakefolio-preview.yml"
+      - "web/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sakefolio-preview
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+        working-directory: web
+      - name: Run security tests
+        run: npm run test:security
+        working-directory: web
+      - name: Typecheck and build for GitHub Pages
+        run: npm run build
+        working-directory: web
+        env:
+          GITHUB_PAGES: "true"
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+      - name: Upload preview website artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: sakefolio-preview
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy preview to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
