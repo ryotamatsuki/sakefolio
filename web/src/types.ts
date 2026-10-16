@@ -6,6 +6,7 @@ export interface Brand {
   breweryId?: string;
   municipality?: string;
   breweryAddress?: string;
+  addressSource?: 'SAKEOpenData';
 }
 export interface RecordEntry {
   reviewId: string;

@@ -410,7 +410,7 @@ export default function App() {
                   <a href={mapUrl} target="_blank" rel="noopener noreferrer"><MapPin size={16}/>Googleマップで場所を確認<ExternalLink size={14}/></a>
                   <a href={routeUrl} target="_blank" rel="noopener noreferrer"><Compass size={16}/>経路案内<ExternalLink size={14}/></a>
                 </div>
-                <p>選んだ酒蔵名と所在地からGoogleマップを検索します。候補が正しいか確認してください。未確認の位置を自動確定しません。</p>
+                <p>SAKEOpenDataとさけのわを蔵元名・都道府県で照合した住所を参考表示します。古い所在地や事業所住所の可能性があるため、Googleマップで確認してください。未確認の地点は自動確定しません。</p>
               </div>}
               <p className="field-help">所在地は酒蔵の所在地として記録します。お酒の製造場所や原料米の産地とは必ずしも同じではありません。</p>
             </div>

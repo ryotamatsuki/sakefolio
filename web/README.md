@@ -64,3 +64,10 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 - [ ] 写真を本人のDriveへ保存しギャラリーで再表示
 - [ ] iPhoneで撮影・保存・再読込
 - [ ] 兄のGoogleアカウントでは自分のデータが見えず、兄のDriveに独立して保存される
+
+## SAKEOpenData との酒蔵住所結合
+- `public/brewery-addresses.json` は Code for SAKE の SAKEOpenData `json/breweries.json` を元に、さけのわ蔵元名・都道府県に**完全一致**した酒蔵だけを抽出した参考住所です。異なる所在地情報が衝突した蔵元は対象外としています。
+- 元データ: https://github.com/Code-for-SAKE/SAKEOpenData/blob/master/json/breweries.json
+- ライセンス: MIT License, Copyright (c) 2020 Code for SAKE （同梱 `web/public/SAKEOpenData-LICENSE.txt`）。
+- 住所は更新日時・所在地変更・製造所と会社所在地の差のため正確性を保証しません。緯度経度は未収録であり、**地図に正確なピンを置けると解釈しない**でください。現段階ではGoogleマップでの検索・確認を可能にします。
+- 既存の個人登録住所は上書きしません。未一致の酒蔵も手入力できます。旧AppSheetデータは対象外です。

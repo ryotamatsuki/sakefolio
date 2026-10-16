@@ -53,9 +53,33 @@ export function listBreweries(brands:Brand[],records:{breweryName:string;prefect
  }
  return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'ja')||a.prefecture.localeCompare(b.prefecture,'ja'));
 }
+export interface PublicBreweryAddress {breweryName: string; prefecture: string; address: string}
+/** Join external public brewery addresses only on exact brewery + prefecture matches.
+ * No fuzzy matching: homonymous breweries and near-matches must not silently get a false location.
+ */
+export function mergeBreweryAddresses(rows: Brand[], addresses: PublicBreweryAddress[]): Brand[] {
+  const byKey=new Map<string,string>();
+  const duplicates=new Set<string>();
+  for(const row of addresses){
+    const name=row.breweryName?.trim(), pref=row.prefecture?.trim(), address=row.address?.trim();
+    if(!name || !pref || !address || !address.includes(pref))continue;
+    const key=name+'\\u0000'+pref;
+    if(byKey.has(key) && byKey.get(key)!==address)duplicates.add(key);
+    else byKey.set(key,address);
+  }
+  return rows.map(row=>{
+    const key=(row.breweryName||'').trim()+'\\u0000'+(row.prefecture||'').trim();
+    const publicAddress=duplicates.has(key)?undefined:byKey.get(key);
+    return publicAddress && !row.breweryAddress
+      ? {...row,breweryAddress:publicAddress,addressSource:'SAKEOpenData' as const}
+      : row;
+  });
+}
 export async function loadBrands(): Promise<Brand[]> {
   const response = await fetch(import.meta.env.BASE_URL + 'sakenowa-brands.json');
   if (!response.ok) throw new Error('銘柄マスターの取得に失敗しました。');
   const rows: Brand[] = await response.json();
-  return rows.filter((x) => x.brandId && x.brandName);
+  const locationResponse=await fetch(import.meta.env.BASE_URL+'brewery-addresses.json').catch(()=>null);
+  const addresses:PublicBreweryAddress[]=locationResponse?.ok ? await locationResponse.json().catch(()=>[]) : [];
+  return mergeBreweryAddresses(rows.filter(x=>x.brandId&&x.brandName),addresses);
 }
