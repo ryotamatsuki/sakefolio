@@ -1,0 +1,34 @@
+name: Sakefolio verified brewery coordinate updates
+on:
+  push:
+    branches: [test/sakefolio-pages-preview]
+    paths:
+      - "web/data/brewery-osm-location-audit.json"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: sakefolio-coordinate-verify
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify OSM and official website matches
+        run: node scripts/verify-brewery-coordinates.mjs
+        working-directory: web
+      - name: Commit only verified coordinate updates
+        run: |
+          git config user.name "sakefolio-audit-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/brewery-coordinate-verification.json web/public/brewery-coordinates.json
+          if ! git diff --cached --quiet; then
+            git commit -m "data: apply independently verified sake brewery coordinate corrections"
+            git pull --rebase origin test/sakefolio-pages-preview
+            git push origin "HEAD:refs/heads/test/sakefolio-pages-preview"
+          fi
