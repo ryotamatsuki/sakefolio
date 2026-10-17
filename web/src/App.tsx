@@ -3,20 +3,21 @@ import type { FormEvent, ReactNode } from 'react';
 import {
   ArrowRight, BookOpen, Camera, Check, ChevronDown, Compass,
   ExternalLink, FolderHeart, Leaf, LogIn, LogOut, MapPin,
-  Plus, Search, ShieldCheck, Star, Wine, X
+  Plus, Search, ShieldCheck, Star, Wine, X, BarChart3
 } from 'lucide-react';
 import type { SaveAttempt } from './google';
 import { validateRecordInput } from './security';
 import type { Brand, RecordEntry, StorageInfo } from './types';
 import type { BreweryCoordinate } from './breweryMapModel';
 import BreweryMap from './BreweryMap';
+import TasteDashboard from './TasteDashboard';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
 import { AROMA_GROUPS, POPULAR_AROMA_IDS, SENSORY_AXES, TASTE_GROUPS, selectedIds, tagLabels, toggleIds } from './sensory';
 import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
 
-type Tab = 'home' | 'explore' | 'record' | 'places';
+type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights';
 function todayLocal(): string {
   const date = new Date();
   return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
@@ -225,7 +226,8 @@ export default function App() {
     {tab:'home',title:'コレクション',icon:BookOpen},
     {tab:'explore',title:'銘柄を探す',icon:Search},
     {tab:'record',title:'記録する',icon:Plus},
-    {tab:'places',title:'酒蔵と産地',icon:MapPin}
+    {tab:'insights',title:'嗜好分析',icon:BarChart3},
+    {tab:'places',title:'酒蔵地図',icon:MapPin}
   ];
   const goto = useCallback((next:Tab) => {
     setTab(next);setMenuOpen(false);window.scrollTo({top:0,behavior:'smooth'});
@@ -282,6 +284,7 @@ export default function App() {
                 日本酒を記録する <ArrowRight size={18}/>
               </button>
               <button className="hero-link" type="button" onClick={()=>goto('explore')}>銘柄を探す <ArrowRight size={16}/></button>
+              <button className="hero-link" type="button" onClick={()=>goto('insights')}>好みを分析する <BarChart3 size={16}/></button>
             </div>
             <div className="hero-stat"><span>3,303</span> 銘柄のデータベースから見つける</div>
           </div>
@@ -585,6 +588,8 @@ export default function App() {
         </form>
       </section>}
 
+      {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
+        onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}
       {tab==='places' && <section className="page-section interior-section">
         <div className="interior-head"><SectionEyebrow>ORIGIN & TERROIR</SectionEyebrow>
           <h1>私の日本酒地図<span className="green-period">.</span></h1>
