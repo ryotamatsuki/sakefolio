@@ -4,6 +4,7 @@ import {BRAND_STARTERS,KIND_CONFIG,brandMatches,normalizeOffProducts,normalizeWi
 import {buildBackup,validateInternationalRecord} from './internationalLocal.ts';
 import {analyzeInternational,filterInternationalRecords} from './internationalAnalytics.ts';
 import {chinaMasterSearch,normalizeChinaMaster,parseWktPoint,mapProducers,wikidataMatchedLocations} from './internationalMaster.ts';
+import {normalizeOverpass,normalizeOsmSnapshot} from './internationalOsm.ts';
 
 const r=(extra={})=>({
   id:'123e4567-e89b-12d3-a456-426614174000',kind:'baijiu',brandName:'茅台',productName:'商品A',
@@ -118,4 +119,31 @@ test('no high-preference claim without 3 rated cases on both sides',()=>{
    attributes:{aromaStyle:i<2?'酱香型':'浓香型'},brandName:'白酒'+i
  }));
  assert.equal(analyzeInternational(entries,'baijiu').insights.length,0);
+});
+
+test('China OSM facilities accept only named manufacturing sites and never pubs',()=>{
+ const rows=normalizeOverpass({elements:[
+  {type:'node',id:100,lat:36.06,lon:120.38,tags:{name:'青岛工厂',craft:'brewery'}},
+  {type:'way',id:101,center:{lat:38,lon:106},tags:{'name:zh':'宁夏葡萄酒庄',craft:'winery'}},
+  {type:'node',id:102,lat:30,lon:115,tags:{name:'蒸馏厂',craft:'distillery'}},
+  {type:'node',id:103,lat:31,lon:115,tags:{name:'仅售酒吧',amenity:'pub'}},
+  {type:'node',id:104,lat:31,lon:115,tags:{craft:'brewery'}},
+  {type:'node',id:105,lat:55,lon:115,tags:{name:'中国外',craft:'brewery'}}
+ ]}).rows;
+ assert.equal(rows.length,3);
+ assert.equal(rows[0].kind,'beer');
+ assert.equal(rows[1].precision,'geometry_center');
+ assert.equal(rows[2].kind,'unclassified');
+ assert.equal(rows[0].source,'https://www.openstreetmap.org/node/100');
+});
+test('OSM normalizer rejects unverified location, duplicate and mislabeled drink type',()=>{
+ const snapshot=normalizeOsmSnapshot({
+  format:'sakefolio-china-osm-facilities-v1',generatedAt:'2026',rows:[
+   {id:'way/123',name:'A',craft:'winery',kind:'wine',lat:29,lon:106},
+   {id:'way/123',name:'B',craft:'winery',kind:'wine',lat:29,lon:106},
+   {id:'node/124',name:'Wrong type',craft:'distillery',kind:'beer',lat:29,lon:106},
+   {id:'way/125',name:'Out of region',craft:'winery',kind:'wine',lat:100,lon:106}
+  ]});
+ assert.equal(snapshot.rows.length,1);assert.equal(snapshot.rows[0].precision,'geometry_center');
+ assert.equal(normalizeOsmSnapshot({}).rows.length,0);
 });

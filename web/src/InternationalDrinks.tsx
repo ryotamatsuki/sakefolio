@@ -7,6 +7,8 @@ import {buildBackup,listInternationalRecords,restoreBackup,saveInternationalReco
 import type {InternationalRecord} from './internationalLocal';
 import {EMPTY_CHINA_MASTER,chinaMasterSearch,normalizeChinaMaster} from './internationalMaster';
 import type {ChinaMaster,ChinaMasterRow} from './internationalMaster';
+import {EMPTY_CHINA_OSM,normalizeOsmSnapshot} from './internationalOsm';
+import type {ChinaOsmSnapshot,OsmFacility} from './internationalOsm';
 import InternationalProducerMap from './InternationalProducerMap';
 import InternationalInsights from './InternationalInsights';
 
@@ -34,7 +36,9 @@ export default function InternationalDrinks(){
  const [data,setData]=useState(initial('baijiu'));
  const [records,setRecords]=useState<InternationalRecord[]>([]);
  const [master,setMaster]=useState<ChinaMaster>(EMPTY_CHINA_MASTER);
+ const [osmMaster,setOsmMaster]=useState<ChinaOsmSnapshot>(EMPTY_CHINA_OSM);
  const [masterStatus,setMasterStatus]=useState<'loading'|'loaded'|'unavailable'>('loading');
+ const [osmStatus,setOsmStatus]=useState<'loading'|'loaded'|'unavailable'>('loading');
  const [photo,setPhoto]=useState<File|null>(null);
  const [query,setQuery]=useState('');
  const [offQuery,setOffQuery]=useState('');
@@ -70,6 +74,15 @@ export default function InternationalDrinks(){
        const parsed=normalizeChinaMaster(raw);
        setMaster(parsed);setMasterStatus(parsed.rows.length?'loaded':'unavailable');
      }).catch(()=>{if(active)setMasterStatus('unavailable');});
+   return ()=>{active=false;};
+ },[]);
+ useEffect(()=>{
+   let active=true;
+   fetch(import.meta.env.BASE_URL+'china-osm-facilities.json',{cache:'no-cache'})
+     .then(r=>{if(!r.ok)throw Error('No OSM');return r.json();})
+     .then(raw=>{if(!active)return;const parsed=normalizeOsmSnapshot(raw);
+        setOsmMaster(parsed);setOsmStatus(parsed.rows.length?'loaded':'unavailable');})
+     .catch(()=>{if(active)setOsmStatus('unavailable');});
    return ()=>{active=false;};
  },[]);
  const swap=(next:BeverageKind)=>{setKind(next);setData(initial(next));setQuery('');setOffResults([]);setOffState('idle');setPhoto(null);setSelected('');setError('');};
@@ -275,8 +288,21 @@ export default function InternationalDrinks(){
         <p className="international-small">Google Drive同期は未実装です。保存できたら「マイコレクション」で確認し、バックアップを作成してください。</p>
       </form>
     </div>
-   </>:section==='map'?<InternationalProducerMap master={master.rows} records={records}
-      onRecordSelect={id=>{setSelected(id);setFilter('all');setSection('collection');}}/>:
+   </>:section==='map'?<>
+      <p className="international-map-source-status">Wikidata {master.rows.filter(r=>r.class==='producer'&&r.lat!==null).length}件／
+        OpenStreetMap {osmMaster.rows.length}施設 {osmStatus==='loading'?'（OSM読込中）':osmStatus==='unavailable'?'（OSMデータ未取得）':''}。
+        位置精度と利用条件は出典ごとに異なります。</p>
+      <InternationalProducerMap master={master.rows} osm={osmMaster.rows} records={records}
+       onRecordSelect={id=>{setSelected(id);setFilter('all');setSection('collection');}}
+       onUseFacility={(place:OsmFacility)=>{
+         setKind(place.kind==='wine'?'wine':place.kind==='beer'?'beer':'baijiu');
+         setData(d=>({...d,kind:place.kind==='wine'?'wine':place.kind==='beer'?'beer':'baijiu',
+           producer:place.name,region:place.address,sourceUrl:place.source,
+           attributes:{...d.attributes,osmId:place.id,producerQid:''}}));
+         setSection('new');setQuery(place.name);
+         window.scrollTo({top:0,behavior:'smooth'});
+       }}/>
+      </>:
     section==='insights'?<InternationalInsights records={records}
       onRecordSelect={id=>{setSelected(id);setFilter('all');setSection('collection');}}/>:<>
      <div className="international-backup">

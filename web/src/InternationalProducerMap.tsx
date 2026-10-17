@@ -4,18 +4,37 @@ import {Compass,ExternalLink,MapPin,Search} from 'lucide-react';
 import {project,unproject,fitBreweryLocations} from './breweryMapModel.ts';
 import type {ChinaMasterRow} from './internationalMaster';
 import {mapProducers} from './internationalMaster';
+import type {OsmFacility} from './internationalOsm';
 import type {InternationalRecord} from './internationalLocal';
 import type {BeverageKind} from './internationalCatalog';
 import {KIND_NAME} from './internationalCatalog';
 
-interface Props {master:ChinaMasterRow[];records:InternationalRecord[];onRecordSelect:(id:string)=>void}
+type MapPoint={
+  id:string;name:string;kind:BeverageKind|'unclassified';description:string;
+  lat:number;lon:number;source:string;origin:'wikidata'|'osm';precision:string;address:string
+};
+interface Props {
+  master:ChinaMasterRow[];osm:OsmFacility[];records:InternationalRecord[];
+  onRecordSelect:(id:string)=>void;onUseFacility:(facility:OsmFacility)=>void;
+}
 type View={lat:number;lon:number;zoom:number};
 const TILE=256,range=(x:number,a:number,b:number)=>Math.min(b,Math.max(a,x));
 const initial:View={lat:35.5,lon:104,zoom:4};
 const TILE_DOMAIN='https://tile.openstreetmap.org/';
 const osmSearch=(name:string)=>'https://www.openstreetmap.org/search?query='+encodeURIComponent(name+' 中国');
-export default function InternationalProducerMap({master,records,onRecordSelect}:Props){
- const locations=useMemo(()=>mapProducers(master),[master]);
+const nameOf=(kind:BeverageKind|'unclassified')=>kind==='unclassified'?'蒸留所（酒類未分類）':KIND_NAME(kind);
+export default function InternationalProducerMap({master,osm,records,onRecordSelect,onUseFacility}:Props){
+ const locations=useMemo<MapPoint[]>(()=>[
+   ...mapProducers(master).map(p=>({
+     id:p.id,name:p.name,kind:p.kind,description:p.description,lat:p.lat!,lon:p.lon!,
+     source:p.source,origin:'wikidata' as const,precision:'企業エンティティの登録座標',address:p.region
+   })),
+   ...osm.map(p=>({
+     id:'osm:'+p.id,name:p.name,kind:p.kind,description:p.operator,lat:p.lat,lon:p.lon,
+     source:p.source,origin:'osm' as const,
+     precision:p.precision==='node'?'OSM施設ノード':'OSMの領域中心（入口ではない）',address:p.address
+   }))
+ ],[master,osm]);
  const [kind,setKind]=useState<'all'|BeverageKind>('all');
  const [query,setQuery]=useState('');
  const points=useMemo(()=>locations.filter(p=>(kind==='all'||p.kind===kind)&&
@@ -46,10 +65,11 @@ export default function InternationalProducerMap({master,records,onRecordSelect}
      items.push({x:i*TILE-left,y:j*TILE-top,tx:((i%(2**view.zoom))+2**view.zoom)%2**view.zoom,ty:j,key:view.zoom+'/'+i+'/'+j});
    return items;
  },[view.lat,view.lon,view.zoom,size.width,size.height]);
- const match=(p:ChinaMasterRow)=>records.filter(r=>r.attributes.producerQid===p.id);
+ const match=(p:MapPoint)=>records.filter(r=>p.origin==='osm'?
+   r.attributes.osmId===p.id.slice(4):r.attributes.producerQid===p.id);
  const chosen=points.find(p=>p.id===selected)||null;
  const withoutMap=records.filter(r=>!r.attributes.producerQid||
-   !locations.some(p=>p.id===r.attributes.producerQid));
+   !locations.some(p=>p.id===r.attributes.producerQid||p.id==='osm:'+r.attributes.osmId));
  const zoom=(d:number)=>setView(v=>({...v,zoom:range(v.zoom+d,3,14)}));
  const pointerDown=(e:ReactPointerEvent<HTMLDivElement>)=>{
    if(e.pointerType==='mouse'&&e.button!==0)return;
@@ -69,7 +89,7 @@ export default function InternationalProducerMap({master,records,onRecordSelect}
  return <section className="international-map">
    <div className="international-feature-head">
      <div><span className="taste-eyebrow">CHINA ORIGIN ATLAS</span><h2>中国のお酒の産地マップ</h2>
-       <p>Wikidataで座標が登録されているメーカー・醸造所を表示します。会社所在地の座標である場合があり、工場入口や仕込み場所を確認した位置とは限りません。</p></div>
+       <p>Wikidataに登録された企業座標と、OpenStreetMapに醸造所・ワイナリー・蒸留所として登録された施設を出典別に表示します。工場入口の実測位置を保証するものではありません。</p></div>
      <div className="international-feature-stats"><strong>{points.length}</strong><span>座標付き候補</span></div>
    </div>
    <div className="international-map-toolbar">
@@ -91,7 +111,7 @@ export default function InternationalProducerMap({master,records,onRecordSelect}
          const left=delta+size.width/2,top=pos.y-center.y+size.height/2;
          if(left< -20||left>size.width+20||top< -20||top>size.height+20)return null;
          const count=match(p).length;
-         return <button type="button" key={p.id} className={'international-map-point '+(count?'has-memory ':'')+(p.id===selected?'active':'')}
+         return <button type="button" key={p.id} className={'international-map-point '+(p.origin==='osm'?'osm ':'wikidata ')+(count?'has-memory ':'')+(p.id===selected?'active':'')}
            title={p.name+'（Wikidata登録座標・施設位置の保証なし）'} aria-label={p.name+'、記録'+count+'件'} aria-pressed={p.id===selected}
            style={{left,top}} onPointerDown={e=>e.stopPropagation()} onClick={()=>setSelected(p.id)}>
            {count||'•'}</button>;
@@ -115,15 +135,21 @@ export default function InternationalProducerMap({master,records,onRecordSelect}
        {points.length?points.slice(0,250).map(p=><button type="button" key={p.id} onClick={()=>{
          setSelected(p.id);setView(v=>({...v,lat:p.lat!,lon:p.lon!,zoom:Math.max(9,v.zoom)}));
        }} className={p.id===selected?'active':''}>
-         <span><strong>{p.name}</strong><small>{KIND_NAME(p.kind)} · 記録 {match(p).length}件</small></span>
+         <span><strong>{p.name}</strong><small>{nameOf(p.kind)} · 記録 {match(p).length}件</small></span>
          <MapPin size={17}/></button>):<p>確認できる施設座標はありません。</p>}
        {points.length>250&&<p>表示は250件まで。名称で絞り込んでください。</p>}
      </div>
      <div className="international-map-detail">
        {chosen?<><h3>{chosen.name}</h3>
-           <p>{chosen.description||'説明未登録'} · {KIND_NAME(chosen.kind)}</p>
-           <p className="international-location-warning">Wikidataのこのエンティティに登録された座標です。製造工場の位置が個別に現地確認されているわけではありません。</p>
-           <a href={chosen.source} target="_blank" rel="noopener noreferrer"><ExternalLink size={15}/> Wikidata原典を確認</a>
+           <p>{chosen.description||'説明未登録'} · {nameOf(chosen.kind)}</p>
+           <p className="international-location-warning">{chosen.origin==='osm'?
+     'OpenStreetMapに施設タグが付いた位置です。領域中心点は入口ではなく、施設タグと実際の製造内容の一致は現地確認していません。':
+     'Wikidataの企業エンティティに登録された座標です。実際の製造工場の位置ではない可能性があります。'}
+     <strong> {chosen.precision}</strong></p>
+     {chosen.origin==='osm'&&chosen.kind!=='unclassified'&&<button type="button" onClick={()=>{const item=osm.find(x=>'osm:'+x.id===chosen.id);if(item)onUseFacility(item);}}>
+       この施設を使って商品を記録する →</button>}
+     {chosen.origin==='osm'&&chosen.kind==='unclassified'&&<p>酒類を特定できない蒸留所のため、白酒とは断定せず、施設情報だけを表示します。</p>}
+           <a href={chosen.source} target="_blank" rel="noopener noreferrer"><ExternalLink size={15}/> {chosen.origin==='osm'?'OpenStreetMap原典を確認':'Wikidata原典を確認'}</a>
            <a href={osmSearch(chosen.name)} target="_blank" rel="noopener noreferrer"><MapPin size={15}/> OpenStreetMapで照合</a>
            <h4>このメーカーに紐づく自分の記録</h4>
            {match(chosen).length?match(chosen).map(r=><button key={r.id} onClick={()=>onRecordSelect(r.id)} type="button">{r.productName} — {r.experience==='tasted'?'★'+(r.rating||'未評価'):'商品登録のみ'} →</button>):
@@ -133,10 +159,10 @@ export default function InternationalProducerMap({master,records,onRecordSelect}
    </div>
    {!!withoutMap.length&&<div className="international-unlocated">
      <h3>所在地を特定できない記録：{withoutMap.length}件</h3>
-     <p>正確なWikidata Q-IDと座標が一致しない記録にはピンを置きません。</p>
+     <p>Wikidata Q-IDまたは明示的に選んだOSM施設IDと座標が一致しない記録にはピンを置きません。</p>
      {withoutMap.slice(0,40).map(r=><button type="button" key={r.id} onClick={()=>onRecordSelect(r.id)}>
        {r.productName} · {r.producer||r.brandName} →</button>)}
    </div>}
-   <p className="international-map-disclaimer">背景地図のタイルはOpenStreetMapから取得します。中国本土からの到達性は未検証です。あなたの写真・コメント・評価はタイル配信先へ送信しません。Wikidataの座標と実際の製造所を同一と推定していません。</p>
+   <p className="international-map-disclaimer">背景地図のタイルとOSM施設データは© OpenStreetMap contributors（ODbL）、Wikidata項目はCC0です。中国本土からの到達性は未検証です。個人の写真・コメント・評価はタイル配信先へ送信しません。企業登録座標やOSM中心点を実際の工場入口と同一視しません。</p>
  </section>;
 }

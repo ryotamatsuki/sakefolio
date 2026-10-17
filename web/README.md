@@ -133,3 +133,10 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 - CI: `.github/workflows/sakefolio-china-master.yml` は**feat/china-beverages-local-firstだけ**の更新を許可し、`main`および現在のGitHub Pages公開版は不変更。`sakefolio-china-ci.yml`は検証専用でデプロイなし。
 
 制約：Wikidataの座標は本社・会社を示す可能性があり現地確認の工場ピンではない。酒類別のサンプルが不足する場合は分析コメントを作らない。OpenStreetMapタイル・WDQS・Open Food Facts・Wikidataの中国本土からの到達性は未検証。ユーザーの中国酒は引き続きブラウザ内IndexedDBにのみ保存される。
+
+### 中国の醸造・蒸留施設（OpenStreetMap ODbL）
+- `web/scripts/build-china-osm-facilities.mjs` はOverpass APIを用い、**ISO3166-1=CNの行政エリア内**で `craft=brewery/winery/distillery` または `industrial=...` の付いた**名前のある施設**を抽出します。店舗の `brewery=*` タグを製造所と誤認しません。
+- OSMのノード点と建物・領域の**中心点（入口ではない）**を区別。各結果は個別OSMオブジェクトURLを付与。酒類不明の `distillery` を白酒製造所と自動分類しません。
+- 静的 `web/public/china-osm-facilities.json` と取得監査 `web/data/china-osm-facility-report.json` をWikidataのCC0マスターとは別々に保存。OSMのデータはODbLで© OpenStreetMap contributors。
+- `InternationalProducerMap.tsx` では出典別の表示と、OSM IDを手動で選択した記録に限る厳密な紐付けができます。地図に表示しても製造所の稼働状況・実際の製造品種・測地精度を保証しません。
+- Overpassの利用規定・公共サーバー負荷に配慮し、手動または専用ワークフローでの再生成に限ります。取得失敗時には推測点で補完しません。

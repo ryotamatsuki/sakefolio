@@ -1,0 +1,42 @@
+name: Build China OSM facility snapshot (isolated branch)
+on:
+  push:
+    branches: [feat/china-beverages-local-first]
+    paths:
+      - web/scripts/build-china-osm-facilities.mjs
+      - web/src/internationalOsm.ts
+      - .github/workflows/sakefolio-china-osm.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/china-beverages-local-first
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Retrieve actual OSM production facilities
+        id: snapshot
+        continue-on-error: true
+        run: node --experimental-strip-types web/scripts/build-china-osm-facilities.mjs
+      - name: Save output to dev branch only
+        run: |
+          test "$GITHUB_REF_NAME" = "feat/china-beverages-local-first"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/public/china-osm-facilities.json web/data/china-osm-facility-report.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "data: refresh China OSM facility snapshot [isolated]"
+            git push origin HEAD:feat/china-beverages-local-first
+          fi
+      - name: Report failure
+        if: steps.snapshot.outcome != 'success'
+        run: |
+          echo "No verified OSM facility snapshot available, preserving previous data."
+          exit 1

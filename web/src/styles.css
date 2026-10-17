@@ -752,3 +752,8 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
  .international-facet-row{grid-template-columns:minmax(0,1fr) 68px 15px}
  .international-master-hits button{min-height:51px}
 }
+
+.international-map-source-status{padding:9px 12px;border:1px solid #dae6d6;border-radius:8px;background:#f5f8f3;color:#6b866e;font-size:11px;line-height:1.8}
+.international-map-point.osm{background:#3c6e95;border-style:dotted;border-width:3px}
+.international-map-point.wikidata{background:#507e63}
+.international-map-point.has-memory{background:#a97733}
