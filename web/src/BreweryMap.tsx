@@ -15,9 +15,13 @@ interface Props {
 type View={lat:number;lon:number;zoom:number};
 const TILE_SIZE=256;
 const clampZoom=(z:number)=>Math.max(3,Math.min(15,z));
+const isDemoRecord=(r:RecordEntry)=>r.reviewId.startsWith('sakefolio-demo-') || r.productName.startsWith('DEBUG-') || r.notes?.startsWith('React版の保存テスト') || r.notes?.startsWith('React版JPEG保存テスト');
 
 export default function BreweryMap({records,locations,renderPhoto,onRecordBrewery,onExplore}:Props) {
-  const history=useMemo(()=>collectBreweryHistory(records,locations),[records,locations]);
+  const [includeDemo,setIncludeDemo]=useState(true);
+  const demoCount=useMemo(()=>records.filter(isDemoRecord).length,[records]);
+  const visibleRecords=useMemo(()=>includeDemo?records:records.filter(r=>!isDemoRecord(r)),[records,includeDemo]);
+  const history=useMemo(()=>collectBreweryHistory(visibleRecords,locations),[visibleRecords,locations]);
   const mapRef=useRef<HTMLDivElement>(null);
   const gesture=useRef<{id:number;x:number;y:number;view:View}|null>(null);
   const [size,setSize]=useState({width:760,height:440});
@@ -101,6 +105,11 @@ export default function BreweryMap({records,locations,renderPhoto,onRecordBrewer
         <span>地図に表示</span>
       </div>
     </div>
+    {!!demoCount&&<label className="sake-atlas__demo-toggle">
+      <input type="checkbox" checked={includeDemo} onChange={e=>setIncludeDemo(e.target.checked)}/>
+      <span>テスト記録 {demoCount}件を表示する</span>
+      <small>実際に飲んだ記録ではありません。後で非表示にできます。</small>
+    </label>}
     <div className="sake-atlas__map" ref={mapRef} role="region" aria-label="飲んだ日本酒の酒蔵マップ。地図をドラッグして移動、拡大縮小ボタンでズーム">
       <div className="sake-atlas__surface" onPointerDown={onPointerDown} onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onWheel={onWheel}>
@@ -118,10 +127,11 @@ export default function BreweryMap({records,locations,renderPhoto,onRecordBrewer
           if(px < -25||px > size.width+25||py < -25||py > size.height+25)return null;
           const approx=coordinate.precision==='town_approximate';
           const verified=coordinate.precision==='facility_osm_verified';
+          const demoOnly=g.records.every(isDemoRecord);
           return <button type="button" key={g.key}
-            className={'sake-atlas__marker'+(approx?' approximate':verified?' verified':' address')+(selected?.key===g.key?' active':'')}
+            className={'sake-atlas__marker'+(approx?' approximate':verified?' verified':' address')+(selected?.key===g.key?' active':'')+(demoOnly?' demo':'')}
             style={{left:px,top:py}} aria-pressed={selected?.key===g.key}
-            aria-label={g.breweryName+'、飲酒記録'+g.records.length+'件、'+precisionText(coordinate.precision)}
+            aria-label={g.breweryName+'、'+(demoOnly?'テスト記録':'飲酒記録')+g.records.length+'件、'+precisionText(coordinate.precision)}
             title={g.breweryName+'：'+precisionText(coordinate.precision)}
             onPointerDown={e=>e.stopPropagation()} onClick={()=>select(g)}>
             <span>{g.records.length}</span>
@@ -135,7 +145,7 @@ export default function BreweryMap({records,locations,renderPhoto,onRecordBrewer
       </div>
       {!mapped.length && <div className="sake-atlas__no-markers">
         <strong>あなたの日本酒地図は、ここから。</strong>
-        <p>{records.length?'記録した酒蔵に位置を確定できるデータがまだありません。住所検索から確認できます。':'最初の日本酒を記録すると、位置が確認できた酒蔵が表示されます。'}</p>
+        <p>{visibleRecords.length?'記録した酒蔵に表示できる座標がありません。住所検索から確認できます。':'表示対象の記録がありません。テスト記録を表示するか、最初の一杯を記録してください。'}</p>
         <button type="button" onClick={onExplore}>日本酒を探す</button>
       </div>}
       <div className="sake-atlas__attribution">
@@ -147,6 +157,7 @@ export default function BreweryMap({records,locations,renderPhoto,onRecordBrewer
       <span><i className="sake-atlas__legend-dot verified"/>施設を資料照合</span>
       <span><i className="sake-atlas__legend-dot address"/>住所・地番の代表点</span>
       <span><i className="sake-atlas__legend-dot approximate"/>町丁目の参考位置</span>
+      <span><i className="sake-atlas__legend-dot demo"/>テスト記録のみ</span>
     </div>
     <div className="sake-atlas__details">
       <div className="sake-atlas__places">
@@ -159,7 +170,7 @@ export default function BreweryMap({records,locations,renderPhoto,onRecordBrewer
                   zoom:g.coordinate!.precision==='town_approximate'?Math.min(v.zoom,8):Math.max(v.zoom,10)}));
               }}>
               <span><strong>{g.breweryName}</strong><small>{g.prefecture} · 記録 {g.records.length}件</small></span>
-              <em>{g.coordinate?(g.coordinate.precision==='town_approximate'?'参考位置':'地図あり'):'位置未確認'}</em>
+              <em>{g.records.every(isDemoRecord)?'テスト':g.coordinate?(g.coordinate.precision==='town_approximate'?'参考位置':'地図あり'):'位置未確認'}</em>
             </button>)
           : <p className="sake-atlas__empty-list">まずは一杯を記録してください。</p>}
       </div>
@@ -169,6 +180,7 @@ export default function BreweryMap({records,locations,renderPhoto,onRecordBrewer
             <span className="sake-atlas__eyebrow">BREWERY MEMORY</span>
             <h3>{selected.breweryName}</h3>
             <p>{[selected.prefecture,selected.address||selected.coordinate?.address].filter(Boolean).join(' · ')}</p>
+            {selected.records.every(isDemoRecord)&&<span className="sake-atlas__demo-note">テスト記録：実際に飲んだ履歴ではありません</span>}
             <span className="sake-atlas__precision">{selected.coordinate
               ?precisionText(selected.coordinate.precision):'位置未確認：地図に推測のピンは表示しません'}</span>
           </div>
@@ -184,7 +196,7 @@ export default function BreweryMap({records,locations,renderPhoto,onRecordBrewer
             {selected.records.map(r=><article className="sake-atlas__memory-card" key={r.reviewId}>
               <div className="sake-atlas__memory-photo">{r.photoId?renderPhoto(r):<span>写真なし</span>}</div>
               <div>
-                <time dateTime={r.drinkingDate}>{r.drinkingDate}</time>
+                <time dateTime={r.drinkingDate}>{r.drinkingDate}{isDemoRecord(r)?' · DEMO':''}</time>
                 <strong>{r.brandName}{r.productName?' · '+r.productName:''}</strong>
                 <span>{r.rating?'★ '+r.rating+' / 5':''}{r.sakeType?' · '+r.sakeType:''}</span>
                 {r.notes&&<p>{r.notes}</p>}

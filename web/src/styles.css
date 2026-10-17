@@ -373,3 +373,13 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
  .sake-atlas__controls{top:9px;right:9px}
  .sake-atlas__controls button{min-width:39px;min-height:39px}
 }
+
+/* Demo data visibility is explicit; never suggest these represent real tastings. */
+.sake-atlas__demo-toggle{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff6df;border:1px solid #e8d8ad;color:#6b542b;border-radius:10px;padding:12px 15px;margin:0 0 15px;font-size:12px;cursor:pointer}
+.sake-atlas__demo-toggle input{accent-color:#315b3f;width:18px;height:18px;cursor:pointer}
+.sake-atlas__demo-toggle span{font-weight:750}
+.sake-atlas__demo-toggle small{color:#827455;font-size:11px}
+.sake-atlas__marker.demo{box-shadow:0 0 0 4px #e4b65299,0 2px 9px #193e2d60}
+.sake-atlas__legend-dot.demo{background:#e4b652;box-shadow:0 0 0 1px #a17c34}
+.sake-atlas__demo-note{display:block;width:max-content;max-width:100%;border-radius:5px;background:#fff1c8;color:#795b2f;padding:7px 9px;margin-top:10px;font-size:11px}
+@media(max-width:760px){.sake-atlas__demo-toggle small{flex-basis:100%;padding-left:28px}}

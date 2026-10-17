@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {collectBreweryHistory,fitBreweryLocations,precisionText,project,unproject} from './breweryMapModel.ts';
@@ -34,4 +35,18 @@ test('projection round-trip and fitting stay within usable zoom levels',()=>{
   assert.equal(fitBreweryLocations([point('石鎚')],700,400).zoom,11);
   const fit=fitBreweryLocations([point('石鎚'),{...point('別'),lat:43,lon:141}],700,400);
   assert.ok(fit.zoom>=3 && fit.zoom<=12);
+});
+
+test('ten demo brands resolve eight known map pins without inventing points',()=>{
+  const file=new URL('../public/brewery-coordinates.json',import.meta.url);
+  const coords=JSON.parse(readFileSync(file,'utf8'));
+  const names=['石鎚酒造','梅錦山川','株式会社獺祭','朝日酒造','八海醸造','油長酒造','小林酒造','黒龍酒造','西田酒造店','高木酒造'];
+  const prefectures=['愛媛県','愛媛県','山口県','新潟県','新潟県','奈良県','栃木県','福井県','青森県','山形県'];
+  const entries=names.map((name,i)=>rec(name,prefectures[i]));
+  const history=collectBreweryHistory(entries,coords);
+  assert.equal(history.totalBreweries,10);
+  assert.ok(history.mapped.length>=8);
+  const missing=new Set(history.unmapped.map(g=>g.breweryName));
+  assert.ok(!missing.has('石鎚酒造'));
+  assert.ok(!missing.has('黒龍酒造'));
 });
