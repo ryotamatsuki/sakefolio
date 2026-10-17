@@ -124,3 +124,12 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 
 ### Wikidataの任意検索（追加）
 - 「Wikidataでブランド・メーカーを照合」は `wbsearchentities` を中国語で検索する任意機能です。キーワードだけをWikidataに送信し、企業以外の同名項目も結果に混入するため、候補の説明・Q-IDをユーザーが確認します。Wikidataで確認された商品スペックや工場座標を自動補完する機能ではありません。CC0: https://www.wikidata.org/wiki/Wikidata:Licensing
+
+## 2026-10-17: 中国酒拡張 Stage 2–4（隔離ブランチ限定）
+- Wikidata CC0の自動マスター `web/public/china-wikidata-master.json`: `web/scripts/build-china-wikidata-master.mjs` がWDQSで白酒・黄酒・ビール・ワインの固有商品とメーカーを抽出し、失敗しやすい広域クエリの代替としてMediaWikiの検索＋実体属性（P31/P279/P17/P495/P176）照合を行う。**検索にヒットしただけでは商品として採用しない**。各行にWikidata Q-IDと直接リンクを保存。監査 `web/data/china-wikidata-master-audit.json` にクエリ件数・タイムアウト・分類別件数を明記。商品エンティティ数はWikidataの収録範囲に左右され、一般の酒類SKUを網羅するものではない。
+- オープンデータ間のライセンスは分離: WikidataデータはCC0。Open Food FactsのODbL商品データは同一静的マスターへ結合せず、明示的な検索時だけ取得。個人記録は外部マスターに含めない。
+- 中国メーカー地図: `InternationalProducerMap.tsx` は、製造者自身のWikidata P625座標だけをピン化し、町の代表点・中国行政区の代表点は使用しない。Wikidataのメーカー・企業エンティティ座標は**実際の製造所の建物位置を保証しない**。写真・メモ・評価をタイルサーバーへ送らない。個人の記録との紐付けは名前の曖昧一致ではなく、記録時に選んだ `producerQid` の厳密一致。未照合記録は別リストへ表示。
+- 酒類別嗜好分析: `InternationalInsights.tsx`、`internationalAnalytics.ts`。酒類混合平均を廃止し、白酒=香型、黄酒=区分・糖度、ビール=スタイル・苦味・ボディ、ワイン=種類・ブドウ品種・ボディなどを別々に集計。各分布・項目をタップすると該当記録へ移動。嗜好コメントは**同じ酒類内の各グループの評価3件以上および対照群3件以上、差0.35点以上**の場合のみ生成。未飲酒の登録は評価・嗜好推定の母集団から除外。自由入力の香り・味わいは完全一致の記述タグのみを集計。
+- CI: `.github/workflows/sakefolio-china-master.yml` は**feat/china-beverages-local-firstだけ**の更新を許可し、`main`および現在のGitHub Pages公開版は不変更。`sakefolio-china-ci.yml`は検証専用でデプロイなし。
+
+制約：Wikidataの座標は本社・会社を示す可能性があり現地確認の工場ピンではない。酒類別のサンプルが不足する場合は分析コメントを作らない。OpenStreetMapタイル・WDQS・Open Food Facts・Wikidataの中国本土からの到達性は未検証。ユーザーの中国酒は引き続きブラウザ内IndexedDBにのみ保存される。

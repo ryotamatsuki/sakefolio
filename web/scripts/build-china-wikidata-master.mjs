@@ -21,8 +21,8 @@ PREFIX wikibase: <http://wikiba.se/ontology#>
 PREFIX bd: <http://www.bigdata.com/rdf#>
 `;
 function productQuery(type){
- return prefix+`SELECT DISTINCT ?item ?itemLabel ?itemDescription ?producer ?producerLabel ?coord WHERE {
-  ?item (wdt:P31/wdt:P279*|wdt:P279+) wd:${type} .
+ return prefix+`SELECT DISTINCT ?item ?itemLabel ?itemDescription ?producer ?producerLabel WHERE {
+  ?item (wdt:P31|wdt:P279) wd:${type} .
   FILTER (?item != wd:${type})
   {
     ?item wdt:P495 wd:${country} .
@@ -33,7 +33,6 @@ function productQuery(type){
     ?chinaProducer wdt:P17 wd:${country} .
   }
   OPTIONAL { ?item wdt:P176 ?producer . }
-  OPTIONAL { ?producer wdt:P625 ?coord . }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "zh,ja,en". }
 } LIMIT 800`;
 }
@@ -92,8 +91,101 @@ for(const [kind,type] of types){
   await sleep(1500);
  }
 }
-const report={source:'https://query.wikidata.org/sparql',queries:8,
- successfulQueries:8-failures.length,failures,counts};
+/* WDQS property-path searches for individual bottles can time out. Augment them
+ * using Wikidata's search+entity APIs and STRICT classification from actual claims.
+ * Search relevance alone never makes an item a beverage record. */
+const queriesByType={
+ baijiu:['白酒','茅台','五粮液','泸州老窖','汾酒','剑南春','洋河','郎酒','古井贡酒','西凤酒','酒鬼酒'],
+ huangjiu:['黄酒','绍兴酒','花雕酒','加饭酒','古越龙山','会稽山','女儿红','塔牌'],
+ beer:['啤酒','青岛啤酒','雪花啤酒','燕京啤酒','哈尔滨啤酒','珠江啤酒','精酿啤酒','Tsingtao'],
+ wine:['葡萄酒','中国葡萄酒','宁夏葡萄酒','张裕葡萄酒','长城葡萄酒','王朝葡萄酒','贺兰山东麓','新疆葡萄酒']
+};
+const qualifiedParent={baijiu:['Q629266'],huangjiu:['Q2724403','Q175245'],
+ beer:['Q44','Q15075508','Q25866325'],wine:['Q282']};
+const entities=new Map(),searched=new Map();
+let searchRuns=0,searchSuccess=0;
+async function api(params){
+ const url='https://www.wikidata.org/w/api.php?'+new URLSearchParams({...params,format:'json'});
+ const response=await fetch(url,{headers:{'User-Agent':'SakefolioChinaMaster/0.2 (ryotamatsuki/sakefolio)',
+   Accept:'application/json'},signal:AbortSignal.timeout(12000)});
+ if(!response.ok)throw Error('Wikidata API HTTP '+response.status);
+ const body=await response.json();
+ if(body?.error)throw Error(String(body.error.code));
+ return body;
+}
+for(const [kind,terms] of Object.entries(queriesByType)){
+ for(const term of terms){
+   searchRuns++;
+   try{
+     const data=await api({action:'wbsearchentities',search:term,language:'zh',uselang:'en',type:'item',limit:'35'});
+     for(const item of data.search||[])if(/^Q[1-9]\\d*$/.test(item.id||'')){
+       if(!searched.has(item.id))searched.set(item.id,new Set());
+       searched.get(item.id).add(kind);
+     }
+     searchSuccess++;
+   }catch(error){failures.push('search-'+term+' '+String(error).slice(0,120));}
+   await sleep(200);
+ }
+}
+const qids=[...new Set([...searched.keys(),...raw.map(r=>r.id),
+ 'Q1518607','Q313542','Q5072156'])];
+for(let i=0;i<qids.length;i+=45){
+ try{
+   const results=await api({action:'wbgetentities',ids:qids.slice(i,i+45).join('|'),
+      props:'claims|labels|descriptions',languages:'zh|ja|en',languagefallback:'1'});
+   for(const [qid,entity] of Object.entries(results.entities||{}))
+     if(entity&&entity.type==='item')entities.set(qid,entity);
+ }catch(error){failures.push('entity-batch-'+i+' '+String(error).slice(0,130));}
+ await sleep(350);
+}
+function claims(q,prop){
+ return (entities.get(q)?.claims?.[prop]||[]).map(s=>s?.mainsnak?.datavalue?.value).filter(Boolean);
+}
+const linked=(q,prop)=>claims(q,prop).map(v=>v?.id||'').filter(Boolean);
+const p17China=q=>linked(q,'P17').includes('Q148');
+for(const row of raw){
+ const point=claims(row.id,'P625').find(v=>Number.isFinite(v.latitude)&&Number.isFinite(v.longitude));
+ if(row.class==='producer'&&point){
+   row.lat=point.latitude;row.lon=point.longitude;
+   row.coordinateSource='https://www.wikidata.org/wiki/'+row.id;
+ }
+}
+for(const [qid,kinds] of searched){
+ const entity=entities.get(qid);if(!entity)continue;
+ const label=entity.labels?.zh?.value||entity.labels?.ja?.value||entity.labels?.en?.value||'';
+ const desc=entity.descriptions?.zh?.value||entity.descriptions?.en?.value||'';
+ if(!label||label.length>200)continue;
+ const types=[...linked(qid,'P31'),...linked(qid,'P279')];
+ const makers=linked(qid,'P176');
+ const country=linked(qid,'P495').includes('Q148')||p17China(qid)||
+   makers.some(m=>p17China(m)||raw.some(r=>r.class==='producer'&&r.id===m));
+ if(!country)continue;
+ for(const kind of kinds){
+   if(!types.some(q=>qualifiedParent[kind].includes(q)))continue;
+   const parent=makers[0]||'';
+   raw.push({id:qid,kind,class:'product',name:label,description:desc,
+    producerName:entities.get(parent)?.labels?.zh?.value||'',producerId:parent,
+    region:'',source:'https://www.wikidata.org/wiki/'+qid,
+    lat:null,lon:null,coordinateSource:''});
+   for(const maker of makers){
+     const m=entities.get(maker);
+     if(!m||!p17China(maker))continue;
+     const label2=m.labels?.zh?.value||m.labels?.en?.value||'';
+     const point=claims(maker,'P625').find(v=>Number.isFinite(v.latitude)&&Number.isFinite(v.longitude));
+     if(label2)raw.push({id:maker,kind,class:'producer',name:label2,
+       description:m.descriptions?.en?.value||'',producerName:'',producerId:'',
+       region:'',source:'https://www.wikidata.org/wiki/'+maker,
+       lat:point?.latitude??null,lon:point?.longitude??null,
+       coordinateSource:point?'https://www.wikidata.org/wiki/'+maker:''});
+   }
+ }
+}
+counts['mediawiki-candidate-ids']=searched.size;
+counts['mediawiki-entity-ids']=entities.size;
+counts['mediawiki-search-success']=searchSuccess;
+const report={source:'https://query.wikidata.org/sparql',queries:8+searchRuns,
+ successfulQueries:8-failures.filter(x=>/^(baijiu|huangjiu|beer|wine)-(product|producer)/.test(x)).length+searchSuccess,
+ failures,counts};
 const normalized=normalizeChinaMaster({
  format:'sakefolio-china-wikidata-v1',license:'CC0',
  generatedAt:new Date().toISOString(),report,rows:raw});
