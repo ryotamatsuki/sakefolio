@@ -593,7 +593,7 @@ export default function App() {
         </form>
       </section>}
 
-      {tab==='international' && <InternationalDrinks/>}
+      {tab==='international' && <InternationalDrinks token={token} storage={storage} onConnect={connect}/>} 
       {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
         renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}

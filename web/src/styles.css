@@ -757,3 +757,14 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 .international-map-point.osm{background:#3c6e95;border-style:dotted;border-width:3px}
 .international-map-point.wikidata{background:#507e63}
 .international-map-point.has-memory{background:#a97733}
+
+/* China Google Drive integration and explicit test classification */
+.international-notice>div{flex:1;min-width:0}
+.international-notice .international-lookup{margin-top:12px;margin-bottom:0}
+.international-experience{grid-template-columns:repeat(3,minmax(0,1fr))}
+.international-test-note{font-size:11px!important;line-height:1.7;align-self:center;background:#fff4de;border-radius:6px;padding:10px;color:#845f30!important}
+.international-test-toggle{display:flex;align-items:center;gap:9px;background:#fff7e6;color:#795729;
+ border:1px solid #e6d3a7;border-radius:9px;padding:12px 14px;font-size:12px;line-height:1.6;margin-bottom:15px}
+.international-test-toggle input{accent-color:#876b34}
+@media(max-width:600px){.international-experience{grid-template-columns:1fr}
+.international-test-note{grid-column:1/-1}}

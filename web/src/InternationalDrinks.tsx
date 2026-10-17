@@ -5,6 +5,9 @@ import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts,n
 import type {BeverageKind,OffProduct,WikidataCandidate} from './internationalCatalog';
 import {buildBackup,listInternationalRecords,restoreBackup,saveInternationalRecord} from './internationalLocal';
 import type {InternationalRecord} from './internationalLocal';
+import type {StorageInfo} from './types';
+import {getPhotoBlob} from './google';
+import {loadChinaCloud,saveChinaCloud} from './internationalCloud';
 import {EMPTY_CHINA_MASTER,chinaMasterSearch,normalizeChinaMaster} from './internationalMaster';
 import type {ChinaMaster,ChinaMasterRow} from './internationalMaster';
 import {EMPTY_CHINA_OSM,normalizeOsmSnapshot} from './internationalOsm';
@@ -13,28 +16,42 @@ import InternationalProducerMap from './InternationalProducerMap';
 import InternationalInsights from './InternationalInsights';
 
 const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
+interface Props {token:string;storage:StorageInfo|null;onConnect:()=>void}
 const initial=(kind:BeverageKind)=>({
   kind,brandName:'',productName:'',producer:'',region:'',sourceUrl:'',attributes:{} as Record<string,string>,
-  experience:'catalogued' as 'catalogued'|'tasted',tastedAt:'',rating:'',aroma:'',taste:'',notes:''
+  experience:'catalogued' as 'catalogued'|'tasted'|'test',tastedAt:'',rating:'',aroma:'',taste:'',notes:''
 });
-function PhotoPreview({blob,alt}:{blob:Blob|null;alt:string}){
- const [url,setUrl]=useState('');
+function PhotoPreview({blob,photoId,token,alt}:{blob:Blob|null;photoId?:string;token:string;alt:string}){
+ const [url,setUrl]=useState(''),[error,setError]=useState(false);
  useEffect(()=>{
-  if(!blob){setUrl('');return;}
-  const next=URL.createObjectURL(blob);setUrl(next);return()=>URL.revokeObjectURL(next);
- },[blob]);
- return url?<img src={url} alt={alt} loading="lazy"/>:<Wine size={25}/>;
+  let alive=true,current='';
+  setUrl('');setError(false);
+  const task=async()=>{
+   try{
+    const data=blob||(photoId&&token?await getPhotoBlob(token,photoId):null);
+    if(!data)return;
+    current=URL.createObjectURL(data);
+    if(alive)setUrl(current);else URL.revokeObjectURL(current);
+   }catch{if(alive)setError(true);}
+  };
+  void task();
+  return()=>{alive=false;if(current)URL.revokeObjectURL(current);};
+ },[blob,photoId,token]);
+ return url?<img src={url} alt={alt} loading="lazy"/>:
+   error?<span role="alert">写真を取得できません</span>:<Wine size={25}/>;
 }
 const avg=(r:InternationalRecord[])=>{
- const grades=r.map(x=>Number(x.rating)).filter(x=>Number.isInteger(x)&&x>=1&&x<=5);
+ const grades=r.filter(x=>x.experience==='tasted').map(x=>Number(x.rating)).filter(x=>Number.isInteger(x)&&x>=1&&x<=5);
  return grades.length?(grades.reduce((a,b)=>a+b,0)/grades.length).toFixed(2):'—';
 };
 const urlForOff=(q:string)=>'https://world.openfoodfacts.org/cgi/search.pl?search_terms='+
   encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=15&fields=code,product_name,brands,quantity';
-export default function InternationalDrinks(){
+export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [kind,setKind]=useState<BeverageKind>('baijiu');
  const [data,setData]=useState(initial('baijiu'));
  const [records,setRecords]=useState<InternationalRecord[]>([]);
+ const [localCount,setLocalCount]=useState(0);
+ const [cloudLoading,setCloudLoading]=useState(false);
  const [master,setMaster]=useState<ChinaMaster>(EMPTY_CHINA_MASTER);
  const [osmMaster,setOsmMaster]=useState<ChinaOsmSnapshot>(EMPTY_CHINA_OSM);
  const [masterStatus,setMasterStatus]=useState<'loading'|'loaded'|'unavailable'>('loading');
@@ -61,10 +78,16 @@ export default function InternationalDrinks(){
  const own=useMemo(()=>records.filter(r=>filter==='all'||r.kind===filter),[records,filter]);
  const chosen=records.find(x=>x.id===selected);
  const load=async()=>{
-   try{setRecords(await listInternationalRecords());setReady(true);setError('');}
-   catch(e){setReady(false);setError(e instanceof Error?e.message:'端末内データを開けません。');}
+   setCloudLoading(Boolean(token&&storage));
+   try{
+     const local=await listInternationalRecords();
+     setLocalCount(local.length);
+     const actual=token&&storage?await loadChinaCloud(token,storage):local;
+     setRecords(actual);setReady(true);setError('');
+   }catch(e){setReady(false);setError(e instanceof Error?e.message:'記録を読み込めません。');}
+   finally{setCloudLoading(false);}
  };
- useEffect(()=>{void load();},[]);
+ useEffect(()=>{void load();},[token,storage?.spreadsheetId]);
  useEffect(()=>{
    let active=true;
    const url=import.meta.env.BASE_URL+'china-wikidata-master.json';
@@ -138,21 +161,26 @@ export default function InternationalDrinks(){
      producer:data.producer.trim(),region:data.region.trim(),country:'中国',
      sourceUrl:data.sourceUrl,attributes:Object.fromEntries(Object.entries(data.attributes).filter(([,v])=>!!v.trim())),
      experience:data.experience,tastedAt:data.experience==='tasted'?data.tastedAt:'',
-     rating:data.experience==='tasted'?data.rating:'',
-     aroma:data.aroma.trim(),taste:data.taste.trim(),notes:data.notes.trim(),
+     rating:data.experience==='tasted'||data.experience==='test'?data.rating:'',
+     aroma:data.aroma.trim(),taste:data.taste.trim(),
+     notes:data.experience==='test'?'【UXTEST・本人未試飲】'+data.notes.trim():data.notes.trim(),
      createdAt:new Date().toISOString(),photo:null
    };
    try{
-     await saveInternationalRecord(record,photo);
+     if(token&&storage)await saveChinaCloud(token,storage,record,photo);
+     else await saveInternationalRecord(record,photo);
      await load();setData(initial(kind));setPhoto(null);setQuery('');setOffResults([]);setOffState('idle');
-     setSection('collection');setStatus('端末内に保存しました。Google Driveにはまだ同期していません。');
+     setSection('collection');
+     setStatus(token&&storage?'Google Sheetsに保存し、読み戻して確認しました。':'端末内に保存しました。Google Driveには同期していません。');
    }catch(x){setError(x instanceof Error?x.message:'保存できませんでした。');}
    finally{setBusy(false);}
  };
  const backup=async()=>{
    setError('');setStatus('');
    try{
-     const blob=await buildBackup(records),url=URL.createObjectURL(blob),a=document.createElement('a');
+     const complete=await Promise.all(records.map(async r=>({...r,
+       photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId):null)})));
+     const blob=await buildBackup(complete),url=URL.createObjectURL(blob),a=document.createElement('a');
      a.href=url;a.download='sakefolio-china-backup-'+today()+'.json';a.click();
      setTimeout(()=>URL.revokeObjectURL(url),60000);
      setStatus('バックアップのダウンロードを開始しました。端末外にも安全に保管してください。');
@@ -164,7 +192,7 @@ export default function InternationalDrinks(){
    setBusy(true);setError('');setStatus('');
    try{
      const outcome=await restoreBackup(file);await load();
-     setStatus('復元しました：新規'+outcome.added+'件、既存重複'+outcome.duplicates+'件（上書きなし）。');
+     setStatus('端末内へ復元しました：新規'+outcome.added+'件、既存重複'+outcome.duplicates+'件。Google Driveへは自動移行しません。');
      setSection('collection');
    }catch(x){await load();setError(x instanceof Error?x.message:'復元できませんでした。');}
    finally{setBusy(false);}
@@ -172,11 +200,21 @@ export default function InternationalDrinks(){
  return <section className="page-section international-page">
    <div className="interior-head"><span className="taste-eyebrow">SAKEFOLIO · CHINA / INTERNATIONAL LAB</span>
      <h1>中国のお酒を記録する<span className="green-period">.</span></h1>
-     <p>白酒、紹興酒を含む黄酒、中国ビール、中国ワイン。日本酒とは別の分類で記録し、端末内で管理します。</p>
+     <p>白酒、紹興酒を含む黄酒、中国ビール、中国ワイン。日本酒とは別の分類で、Google Driveまたは端末内に記録します。</p>
    </div>
    <div className="international-notice" role="note"><ShieldCheck size={19}/>
-     <div><strong>Googleが使えない環境向けの端末内保存（試験機能）</strong>
-       <p>このページの記録・写真は、このブラウザのIndexedDBに保存します。Google Driveには送信・同期しません。ブラウザのデータ消去や端末故障で失われるため、定期的にバックアップを書き出してください。サイト自体の中国本土からの接続は未確認です。</p></div>
+     {token&&storage?<div>
+       <strong>Google Drive接続中 — 中国酒は専用「ChinaDrinks」シートに保存</strong>
+       <p>日本酒の記録には混ぜません。写真はSakefolioの写真フォルダへ保存します。
+         UXTESTデータは仮評価であり、本人の飲酒体験ではありません。{cloudLoading?'Google Sheetsを読み込み中…':''}</p>
+       {!!localCount&&<p>以前の端末内記録 {localCount}件があります。自動移行していません。
+         接続を解除すると端末内記録を確認できます。</p>}
+     </div>:<div>
+       <strong>現在は端末内保存（Google未接続）</strong>
+       <p>接続するとあなたのGoogle DriveにあるChinaDrinksを読み込み、新規記録もGoogleへ保存します。
+         端末内記録は自動移行しません。中国本土からのGoogle接続は制限される場合があります。</p>
+       <button type="button" className="international-lookup" onClick={onConnect}>Googleに接続して保存する</button>
+     </div>}
    </div>
    {!!status&&<p className="international-status" role="status">{status}</p>}
    {!!error&&<p className="international-error" role="alert">{error}</p>}
@@ -263,12 +301,14 @@ export default function InternationalDrinks(){
         <label>商品情報の出典URL（任意）<input type="url" pattern="https://.*" maxLength={1000}
           value={data.sourceUrl} placeholder="https://..." onChange={e=>setField('sourceUrl',e.target.value)}/></label>
         <div className="international-experience" role="group" aria-label="記録の種別">
-          <button type="button" aria-pressed={data.experience==='catalogued'} onClick={()=>setData(d=>({...d,experience:'catalogued',rating:'',tastedAt:''}))}>商品だけ登録（未飲酒）</button>
+          <button type="button" aria-pressed={data.experience==='catalogued'} onClick={()=>setData(d=>({...d,experience:'catalogued',rating:'',tastedAt:''}))}>商品情報だけ（未飲酒）</button>
           <button type="button" aria-pressed={data.experience==='tasted'} onClick={()=>setData(d=>({...d,experience:'tasted',tastedAt:today()}))}>実際に飲んだ</button>
+          <button type="button" aria-pressed={data.experience==='test'} onClick={()=>setData(d=>({...d,experience:'test',tastedAt:''}))}>UXTEST（仮評価）</button>
         </div>
-        {data.experience==='tasted'&&<div className="field-grid two">
-          <label>飲んだ日 <span className="required">必須</span><input type="date" required value={data.tastedAt} onChange={e=>setField('tastedAt',e.target.value)}/></label>
-          <label>評価（任意）<select value={data.rating} onChange={e=>setField('rating',e.target.value)}>
+        {(data.experience==='tasted'||data.experience==='test')&&<div className="field-grid two">
+          {data.experience==='tasted'?<label>飲んだ日 <span className="required">必須</span><input type="date" required value={data.tastedAt} onChange={e=>setField('tastedAt',e.target.value)}/></label>:
+           <p className="international-test-note">仮評価はUI/UXテスト専用です。飲酒日は保存せず、嗜好分析では区別します。</p>}
+          <label>評価（任意・UXTESTは仮の数値）<select value={data.rating} onChange={e=>setField('rating',e.target.value)}>
             <option value="">未評価</option>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}点</option>)}</select></label>
         </div>}
         <div className="field-grid two">
@@ -284,8 +324,8 @@ export default function InternationalDrinks(){
         </label>
         {photo&&<button type="button" className="international-photo-clear" onClick={()=>setPhoto(null)}>写真を取り消す <X size={14}/></button>}
         <button type="submit" disabled={!ready||busy} className="button button-dark international-save">
-          {busy?'端末へ保存中…':'この商品を端末に保存'} <ArrowRight size={17}/></button>
-        <p className="international-small">Google Drive同期は未実装です。保存できたら「マイコレクション」で確認し、バックアップを作成してください。</p>
+          {busy?'保存中…':token&&storage?'Google Driveに保存する':'この端末に保存する'} <ArrowRight size={17}/></button>
+        <p className="international-small">日本酒の表とは別の「ChinaDrinks」に保存します。端末内からGoogleへの自動同期は行いません。</p>
       </form>
     </div>
    </>:section==='map'?<>
@@ -306,7 +346,9 @@ export default function InternationalDrinks(){
     section==='insights'?<InternationalInsights records={records}
       onRecordSelect={id=>{setSelected(id);setFilter('all');setSection('collection');}}/>:<>
      <div className="international-backup">
-       <div><h2>端末内のコレクション</h2><p>登録 {records.length}件 · 実際に飲んだ記録 {records.filter(r=>r.experience==='tasted').length}件 · 平均評価 {avg(records)}点（評価ありの記録のみ）</p></div>
+       <div><h2>{token&&storage?'Google Drive':'端末内'}のコレクション</h2>
+         <p>登録 {records.length}件 · 実飲 {records.filter(r=>r.experience==='tasted').length}件 ·
+           UXTEST {records.filter(r=>r.experience==='test').length}件 · 実飲平均評価 {avg(records)}点</p></div>
        <div className="international-backup-actions">
          <button type="button" onClick={()=>void backup()} disabled={!ready||!records.length}><Download size={16}/> バックアップ書出し</button>
          <label><Upload size={16}/> バックアップを復元<input type="file" accept=".json,application/json" onChange={e=>void restore(e)} disabled={busy}/></label>
@@ -322,16 +364,16 @@ export default function InternationalDrinks(){
       <div className="international-collection-layout">
        <div className="international-collection-list">{own.map(r=><button type="button" key={r.id}
          aria-pressed={selected===r.id} onClick={()=>setSelected(r.id)}>
-         <span className="international-thumb"><PhotoPreview blob={r.photo} alt={r.brandName+'のラベル'}/></span>
+         <span className="international-thumb"><PhotoPreview blob={r.photo} photoId={r.photoId} token={token} alt={r.brandName+'のラベル'}/></span>
          <span><strong>{r.productName}</strong><small>{KIND_NAME(r.kind)} · {r.brandName}</small>
-           <small>{r.experience==='tasted'?'★ '+(r.rating||'未評価')+' · '+r.tastedAt:'商品情報のみ'} · {r.region||'産地未設定'}</small></span>
+           <small>{r.experience==='tasted'?'★ '+(r.rating||'未評価')+' · '+r.tastedAt:r.experience==='test'?'UXTEST／仮評価 '+(r.rating||'なし'):'商品情報のみ'} · {r.region||'産地未設定'}</small></span>
          <ArrowRight size={17}/></button>)}</div>
        {chosen&&<article className="international-record-detail">
          <button className="international-close" type="button" onClick={()=>setSelected('')}><X size={17}/> 閉じる</button>
-         <div className="international-detail-photo"><PhotoPreview blob={chosen.photo} alt={chosen.productName+'のラベル'}/></div>
+         <div className="international-detail-photo"><PhotoPreview blob={chosen.photo} photoId={chosen.photoId} token={token} alt={chosen.productName+'のラベル'}/></div>
          <h3>{chosen.productName}</h3><p>{chosen.brandName} · {KIND_NAME(chosen.kind)} · {chosen.region}</p>
          <dl>
-           {([['メーカー',chosen.producer],['区分',chosen.experience==='tasted'?'実際に飲んだ':'商品情報のみ'],
+           {([['メーカー',chosen.producer],['区分',chosen.experience==='tasted'?'実際に飲んだ':chosen.experience==='test'?'UXTEST／本人未試飲':'商品情報のみ'],
              ['飲んだ日',chosen.tastedAt],['評価',chosen.rating?chosen.rating+' / 5':''],
              ['香り',chosen.aroma],['味わい',chosen.taste],
              ...Object.entries(chosen.attributes).map(([key,v])=>
@@ -346,6 +388,6 @@ export default function InternationalDrinks(){
        </article>}
       </div>}
    </>}
-   <p className="international-footer"><Info size={14}/> このページは日本酒とは独立した開発中の機能です。国際酒類の登録内容は日本酒用Google Sheets、既存の日本酒地図・嗜好分析には混ぜません。商品名とメーカーの事実確認はラベル・公式情報を優先します。</p>
+   <p className="international-footer"><Info size={14}/> このページは日本酒の表と分離した中国酒専用機能です。Google接続時の記録先はSakefolio_DataのChinaDrinksです。日本酒地図・日本酒嗜好分析には混ぜません。商品名とメーカーの事実確認はラベル・公式情報を優先します。</p>
  </section>;
 }

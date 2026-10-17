@@ -1,4 +1,4 @@
-import {useMemo,useState} from 'react';
+import {useMemo,useState,useEffect} from 'react';
 import {ArrowRight,BarChart3,Camera,ChevronRight,Star,Wine} from 'lucide-react';
 import type {InternationalRecord} from './internationalLocal';
 import type {BeverageKind} from './internationalCatalog';
@@ -17,8 +17,11 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
  const [kind,setKind]=useState<BeverageKind>('baijiu');
  const [drill,setDrill]=useState<{facet:InternationalFacet;value:string}|null>(null);
  const [sort,setSort]=useState<'date'|'high'>('date');
- const report=useMemo(()=>analyzeInternational(records,kind),[records,kind]);
- const matching=useMemo(()=>drill?filterInternationalRecords(records.filter(r=>r.kind===kind),drill.facet,drill.value):[],[drill,records,kind]);
+ const [includeTests,setIncludeTests]=useState(false);
+ const testCount=records.filter(r=>r.experience==='test').length;
+ useEffect(()=>{if(testCount&&!records.some(r=>r.experience!=='test'))setIncludeTests(true);},[testCount,records]);
+ const report=useMemo(()=>analyzeInternational(records,kind,includeTests),[records,kind,includeTests]);
+ const matching=useMemo(()=>drill?filterInternationalRecords(records.filter(r=>r.kind===kind&&(includeTests||r.experience!=='test')),drill.facet,drill.value,includeTests):[],[drill,records,kind,includeTests]);
  const listing=useMemo(()=>[...matching].sort((a,b)=>sort==='high'?
    (Number(b.rating)||0)-(Number(a.rating)||0)||(b.createdAt.localeCompare(a.createdAt)):
    b.createdAt.localeCompare(a.createdAt)),[matching,sort]);
@@ -30,8 +33,10 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
    <div className="international-feature-head">
     <div><span className="taste-eyebrow">PERSONAL DRINKS ANALYTICS · BY TYPE</span>
       <h2>酒類別の嗜好分析</h2>
-      <p>日本酒とは混ぜず、同じ酒類の実際に飲んだ記録の評価から集計します。未飲酒の商品情報は件数に含め、平均評価には含めません。</p>
+      <p>日本酒とは混ぜず、同じ酒類の実際に飲んだ記録の評価から集計します。本人の飲酒記録とUXTESTを分けて集計します。テスト記録の仮評価は切替で確認できます。</p>
     </div><BarChart3 size={34}/></div>
+   {!!testCount&&<label className="international-test-toggle"><input type="checkbox" checked={includeTests}
+     onChange={e=>{setIncludeTests(e.target.checked);setDrill(null);}}/> UXTEST {testCount}件を分析に含める（仮評価は本人の好みではありません）</label>}
    <div className="international-collection-filter" role="group" aria-label="嗜好分析する酒類">
     {KIND_CONFIG.map(c=><button type="button" key={c.id} aria-pressed={kind===c.id}
       onClick={()=>{setKind(c.id);setDrill(null);}}>{c.name}</button>)}
@@ -39,11 +44,11 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
    {drill?<section className="international-drill">
      <button type="button" className="international-drill-back" onClick={()=>setDrill(null)}>← {KIND_NAME(kind)}の分析に戻る</button>
      <h3>{title[drill.facet]}「{drill.value}」の内訳</h3>
-     <p>該当する日本酒以外の記録も含む、{KIND_NAME(kind)}の登録 {matching.length}件</p>
+     <p>日本酒とは別に記録した、{KIND_NAME(kind)}の登録 {matching.length}件</p>
      <label>並び順 <select value={sort} onChange={e=>setSort(e.target.value as typeof sort)}>
        <option value="date">登録日の新しい順</option><option value="high">高評価順</option></select></label>
      <div className="international-drill-list">{listing.map(r=><button type="button" key={r.id} onClick={()=>onRecordSelect(r.id)}>
-       <span><strong>{r.productName}</strong><small>{r.brandName} · {r.experience==='tasted'?'実飲': '商品情報のみ'} · {r.region}</small></span>
+       <span><strong>{r.productName}</strong><small>{r.brandName} · {r.experience==='tasted'?'実飲':r.experience==='test'?'UXTEST（未試飲）':'商品情報のみ'} · {r.region}</small></span>
        <span>{r.rating?'★'+r.rating:'未評価'} <ChevronRight size={16}/></span></button>)}</div>
    </section>:<>
      <div className="international-insight-summary">

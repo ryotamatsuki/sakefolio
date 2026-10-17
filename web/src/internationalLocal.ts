@@ -16,7 +16,7 @@ export interface InternationalRecord {
  country:'中国';
  sourceUrl:string;
  attributes:Record<string,string>;
- experience:'tasted'|'catalogued';
+ experience:'tasted'|'catalogued'|'test';
  tastedAt:string;
  rating:string;
  aroma:string;
@@ -24,6 +24,7 @@ export interface InternationalRecord {
  notes:string;
  createdAt:string;
  photo:Blob|null;
+ photoId?:string;
 }
 export type InternationalTextRecord=Omit<InternationalRecord,'photo'>;
 const isObject=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
@@ -36,9 +37,9 @@ export function validateInternationalRecord(r:InternationalRecord):void {
    if(typeof v!=='string'||v.length>MAX_TEXT||/[\u0000-\u001f]/.test(v))throw new Error(field+'を確認してください。');
  }
  if(!r.brandName.trim()||!r.productName.trim())throw new Error('銘柄と商品名は必須です。');
- if(!['tasted','catalogued'].includes(r.experience))throw new Error('記録種別が不正です。');
+ if(!['tasted','catalogued','test'].includes(r.experience))throw new Error('記録種別が不正です。');
  if(r.rating&&!/^[1-5]$/.test(r.rating))throw new Error('評価は1～5のみです。');
- if(r.experience==='catalogued'&&(r.rating||r.tastedAt))throw new Error('飲酒していない商品に飲酒日・評価を保存できません。');
+ if((r.experience==='catalogued'&&(r.rating||r.tastedAt))||(r.experience==='test'&&r.tastedAt))throw new Error('飲酒していない商品に不正な飲酒日・評価が含まれます。');
  if(r.experience==='tasted'){
    if(!/^\d{4}-\d{2}-\d{2}$/.test(r.tastedAt)||Number.isNaN(Date.parse(r.tastedAt+'T12:00:00Z'))||
      new Date(r.tastedAt+'T12:00:00Z').toISOString().slice(0,10)!==r.tastedAt)throw new Error('飲酒日が不正です。');
@@ -49,6 +50,9 @@ export function validateInternationalRecord(r:InternationalRecord):void {
  for(const [key,value] of Object.entries(r.attributes))
    if(!/^[a-zA-Z]{1,40}$/.test(key)||typeof value!=='string'||value.length>MAX_TEXT)
      throw new Error('詳細項目に不正な値があります。');
+ if(r.photoId!==undefined&&(typeof r.photoId!=='string'||r.photoId.length>200||!/^[\w-]*$/.test(r.photoId)))
+   throw new Error('写真IDが不正です。');
+ if(r.experience==='test'&&!r.notes.includes('UXTEST'))throw new Error('評価テストはUXTESTと明記してください。');
  if(r.photo!==null&&(!(r.photo instanceof Blob)||r.photo.size>MAX_LOCAL_PHOTO_BYTES))
    throw new Error('写真の形式・容量を確認してください。');
 }

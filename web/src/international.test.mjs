@@ -147,3 +147,18 @@ test('OSM normalizer rejects unverified location, duplicate and mislabeled drink
  assert.equal(snapshot.rows.length,1);assert.equal(snapshot.rows[0].precision,'geometry_center');
  assert.equal(normalizeOsmSnapshot({}).rows.length,0);
 });
+
+test('UXTEST rows allow explicitly labelled mock rating but never count as real tastings',()=>{
+ const demo=r({id:'uxcn-20261017-001',experience:'test',rating:'5',
+   notes:'【UXTEST・本人未試飲】グラフ検証用の仮評価'});
+ validateInternationalRecord(demo);
+ assert.throws(()=>validateInternationalRecord({...demo,notes:'商品メモのみ'}),/UXTEST/);
+ assert.throws(()=>validateInternationalRecord({...demo,tastedAt:'2026-10-17'}),/飲酒していない/);
+ const actual=analyzeInternational([demo],'baijiu');
+ const withTests=analyzeInternational([demo],'baijiu',true);
+ assert.equal(actual.total,0);assert.equal(actual.mean,null);
+ assert.equal(withTests.total,1);assert.equal(withTests.mean,5);
+ assert.equal(withTests.distribution[4],1);
+ assert.equal(filterInternationalRecords([demo],'rating','5').length,0);
+ assert.equal(filterInternationalRecords([demo],'rating','5',true).length,1);
+});
