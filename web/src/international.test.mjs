@@ -5,6 +5,8 @@ import {buildBackup,validateInternationalRecord} from './internationalLocal.ts';
 import {analyzeInternational,filterInternationalRecords} from './internationalAnalytics.ts';
 import {chinaMasterSearch,normalizeChinaMaster,parseWktPoint,mapProducers,wikidataMatchedLocations} from './internationalMaster.ts';
 import {normalizeOverpass,normalizeOsmSnapshot} from './internationalOsm.ts';
+import {INTERNATIONAL_SENSORY,splitDescriptorTags,toggleDescriptorTag,sensoryAxisScore,
+ sensoryDescriptorValues} from './internationalSensory.ts';
 
 const r=(extra={})=>({
   id:'123e4567-e89b-12d3-a456-426614174000',kind:'baijiu',brandName:'茅台',productName:'商品A',
@@ -161,4 +163,66 @@ test('UXTEST rows allow explicitly labelled mock rating but never count as real 
  assert.equal(withTests.distribution[4],1);
  assert.equal(filterInternationalRecords([demo],'rating','5').length,0);
  assert.equal(filterInternationalRecords([demo],'rating','5',true).length,1);
+});
+
+test('beer and wine offer several conventional flavour families and four rating axes',()=>{
+ for(const kind of ['beer','wine']){
+   const groups=INTERNATIONAL_SENSORY[kind];
+   assert.ok(groups);
+   assert.ok(groups.aroma.length>=3);
+   assert.ok(groups.taste.length>=2);
+   assert.equal(groups.axes.length,4);
+   assert.ok(groups.aroma.flatMap(g=>g.values).length>=15);
+   assert.ok(groups.taste.flatMap(g=>g.values).length>=10);
+   assert.equal(new Set(groups.axes.map(a=>a.key)).size,4);
+ }
+ assert.ok(INTERNATIONAL_SENSORY.beer.aroma.flatMap(g=>g.values).includes('麦芽'));
+ assert.ok(INTERNATIONAL_SENSORY.wine.aroma.flatMap(g=>g.values).includes('カシス'));
+ assert.equal(INTERNATIONAL_SENSORY.baijiu,undefined);
+});
+test('multi-select aroma chips toggle without affecting free text',()=>{
+ const first=toggleDescriptorTag('', '柑橘');
+ const second=toggleDescriptorTag(first,'麦芽');
+ assert.deepEqual(splitDescriptorTags(second),['柑橘','麦芽']);
+ assert.deepEqual(splitDescriptorTags(toggleDescriptorTag(second,'柑橘')),['麦芽']);
+ assert.deepEqual(sensoryDescriptorValues({aromaTags:'柑橘、麦芽'},'麦芽、パン','aroma'),
+  ['柑橘','麦芽','パン']);
+ assert.equal(sensoryAxisScore('5'),5);
+ for(const bad of ['0','6','', '2.5','NaN'])assert.equal(sensoryAxisScore(bad),null);
+});
+test('beer/wine tag choices and axis averages drive category-specific breakdowns',()=>{
+ const beer=[
+   r({id:'beer-test-a1',kind:'beer',experience:'tasted',rating:'5',tastedAt:'2026-10-16',
+      attributes:{aromaTags:'柑橘、麦芽',tasteTags:'すっきり、キレがよい',
+       axisBitterness:'4',axisMalt:'2',axisBody:'1',axisCarbonation:'5'}}),
+   r({id:'beer-test-a2',kind:'beer',experience:'tasted',rating:'3',tastedAt:'2026-10-15',
+      attributes:{aromaTags:'柑橘',tasteTags:'ドライ',
+       axisBitterness:'2',axisMalt:'3',axisBody:'2',axisCarbonation:'3'}}),
+   r({id:'wine-test-a3',kind:'wine',experience:'tasted',rating:'5',tastedAt:'2026-10-14',
+      attributes:{aromaTags:'カシス、バニラ',tasteTags:'しっかりした渋み',
+       axisSweetness:'1',axisAcidity:'3',axisTannin:'5',axisBody:'5'}})
+ ];
+ const a=analyzeInternational(beer,'beer');
+ assert.equal(a.total,2);
+ assert.equal(a.axes.find(x=>x.key==='axisBitterness').mean,3);
+ assert.equal(a.axes.find(x=>x.key==='axisBitterness').count,2);
+ assert.equal(a.facets.aroma.find(x=>x.label==='柑橘').count,2);
+ assert.equal(a.facets.taste.find(x=>x.label==='ドライ').count,1);
+ assert.equal(filterInternationalRecords(beer,'aroma','柑橘').length,2);
+ assert.equal(filterInternationalRecords(beer,'taste','しっかりした渋み').length,1);
+ const w=analyzeInternational(beer,'wine');
+ assert.equal(w.total,1);
+ assert.equal(w.axes.find(x=>x.key==='axisTannin').mean,5);
+ assert.equal(w.facets.aroma.find(x=>x.label==='カシス').count,1);
+});
+test('legacy aroma text and UXTEST data are isolated from genuine tasting analysis',()=>{
+ const r1=r({id:'legacy-beer-a1',kind:'beer',experience:'test',rating:'5',
+   aroma:'橘香,麦芽香',notes:'【UXTEST・本人未試飲】',
+   attributes:{beerStyle:'ラガー'}});
+ const a=analyzeInternational([r1],'beer');
+ assert.equal(a.total,0);assert.equal(a.mean,null);
+ const withTests=analyzeInternational([r1],'beer',true);
+ assert.equal(withTests.total,1);
+ assert.equal(withTests.facets.aroma.find(x=>x.label==='橘香').count,1);
+ assert.equal(withTests.axes[0].mean,null);
 });

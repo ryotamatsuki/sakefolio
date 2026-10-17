@@ -5,6 +5,7 @@ import type {BeverageKind} from './internationalCatalog';
 import {KIND_CONFIG,KIND_NAME} from './internationalCatalog';
 import {analyzeInternational,filterInternationalRecords,KIND_FACETS} from './internationalAnalytics';
 import type {InternationalFacet} from './internationalAnalytics';
+import {sensoryAxisScore,sensoryAxesFor} from './internationalSensory';
 
 interface Props {records:InternationalRecord[];onRecordSelect:(id:string)=>void}
 const title:Record<InternationalFacet,string>={
@@ -15,13 +16,20 @@ const title:Record<InternationalFacet,string>={
 };
 export default function InternationalInsights({records,onRecordSelect}:Props){
  const [kind,setKind]=useState<BeverageKind>('baijiu');
- const [drill,setDrill]=useState<{facet:InternationalFacet;value:string}|null>(null);
+ const [drill,setDrill]=useState<{facet:InternationalFacet|'axis';value:string}|null>(null);
  const [sort,setSort]=useState<'date'|'high'>('date');
  const [includeTests,setIncludeTests]=useState(false);
  const testCount=records.filter(r=>r.experience==='test').length;
  useEffect(()=>{if(testCount&&!records.some(r=>r.experience!=='test'))setIncludeTests(true);},[testCount,records]);
  const report=useMemo(()=>analyzeInternational(records,kind,includeTests),[records,kind,includeTests]);
- const matching=useMemo(()=>drill?filterInternationalRecords(records.filter(r=>r.kind===kind&&(includeTests||r.experience!=='test')),drill.facet,drill.value,includeTests):[],[drill,records,kind,includeTests]);
+ const matching=useMemo(()=>{
+   if(!drill)return [];
+   const candidates=records.filter(r=>r.kind===kind&&(includeTests||r.experience!=='test'));
+   if(drill.facet==='axis')return candidates.filter(r=>
+     (r.experience==='tasted'||(includeTests&&r.experience==='test'))&&
+     sensoryAxisScore(r.attributes[drill.value])!==null);
+   return filterInternationalRecords(candidates,drill.facet,drill.value,includeTests);
+ },[drill,records,kind,includeTests]);
  const listing=useMemo(()=>[...matching].sort((a,b)=>sort==='high'?
    (Number(b.rating)||0)-(Number(a.rating)||0)||(b.createdAt.localeCompare(a.createdAt)):
    b.createdAt.localeCompare(a.createdAt)),[matching,sort]);
@@ -43,17 +51,20 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
    </div>
    {drill?<section className="international-drill">
      <button type="button" className="international-drill-back" onClick={()=>setDrill(null)}>← {KIND_NAME(kind)}の分析に戻る</button>
-     <h3>{title[drill.facet]}「{drill.value}」の内訳</h3>
+     <h3>{drill.facet==='axis'?
+       (sensoryAxesFor(kind).find(a=>a.key===drill.value)?.label||'味わいの軸')+'の記録':
+       title[drill.facet]+'「'+drill.value+'」の内訳'}</h3>
      <p>日本酒とは別に記録した、{KIND_NAME(kind)}の登録 {matching.length}件</p>
      <label>並び順 <select value={sort} onChange={e=>setSort(e.target.value as typeof sort)}>
        <option value="date">登録日の新しい順</option><option value="high">高評価順</option></select></label>
      <div className="international-drill-list">{listing.map(r=><button type="button" key={r.id} onClick={()=>onRecordSelect(r.id)}>
        <span><strong>{r.productName}</strong><small>{r.brandName} · {r.experience==='tasted'?'実飲':r.experience==='test'?'UXTEST（未試飲）':'商品情報のみ'} · {r.region}</small></span>
-       <span>{r.rating?'★'+r.rating:'未評価'} <ChevronRight size={16}/></span></button>)}</div>
+       <span>{drill.facet==='axis'&&<small>{r.attributes[drill.value]} / 5</small>}
+         {r.rating?'★'+r.rating:'未評価'} <ChevronRight size={16}/></span></button>)}</div>
    </section>:<>
      <div className="international-insight-summary">
        <div><Wine size={16}/><span>登録商品</span><strong>{report.total}件</strong></div>
-       <div><Star size={16}/><span>飲んだ記録</span><strong>{report.tasted}件</strong></div>
+       <div><Star size={16}/><span>{includeTests?'実飲＋UXTEST':'飲んだ記録'}</span><strong>{report.tasted}件</strong></div>
        <div><BarChart3 size={16}/><span>平均評価</span><strong>{report.mean===null?'—':report.mean.toFixed(2)} / 5</strong></div>
        <div><Camera size={16}/><span>写真</span><strong>{report.photoCount}枚</strong></div>
      </div>
@@ -67,6 +78,18 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
             disabled={!count} aria-label={'★'+(i+1)+'：'+count+'件'} onClick={()=>setDrill({facet:'rating',value:String(i+1)})}>
             <span>{count}</span><div><i style={{height:report.rated?(count/report.rated*100)+'%':'0%'}}/></div><small>★{i+1}</small></button>)}</div>
        </section>
+       {!!report.axes.length&&<section className="international-insight-panel international-axes-panel">
+         <h3>味わいのバランス（5段階）</h3>
+         <p>各軸は同じ酒類の実飲記録の平均値です。選択すると評価した銘柄の内訳を確認できます。
+           {includeTests?'UXTESTの仮データも含まれます。':''}</p>
+         {report.axes.map(axis=><button type="button" key={axis.key} className="international-axis-summary"
+           disabled={!axis.count} onClick={()=>setDrill({facet:'axis',value:axis.key})}>
+           <span><strong>{axis.label}</strong><small>{axis.low} ～ {axis.high}</small></span>
+           <i><b style={{width:axis.mean!==null?(axis.mean/5*100)+'%':'0%'}}/></i>
+           <span><strong>{axis.mean===null?'—':axis.mean.toFixed(2)}</strong><small>{axis.count}件</small></span>
+           <ChevronRight size={15}/>
+         </button>)}
+       </section>}
        {dimensions.map(({facet,label})=>{
          const rows=(report.facets[facet]||[]).slice(0,12),max=Math.max(1,...rows.map(r=>r.count));
          return <section className="international-insight-panel" key={facet}>
@@ -84,7 +107,7 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
        <p>同じ酒類の該当群・その他群がそれぞれ評価3件以上ある場合だけ比較します。自由入力メモは単語を推定せず、読点などで分割した語の完全一致のみを集計します。</p>
        {report.insights.length?<div>{report.insights.map(it=><button type="button" key={it.id}
          onClick={()=>setDrill({facet:it.facet,value:it.value})}>
-         <strong>{it.text}</strong><span>{it.detail}</span><small>該当する日本酒を確認 →</small></button>)}</div>:
+         <strong>{it.text}</strong><span>{it.detail}</span><small>該当する中国酒を確認 →</small></button>)}</div>:
          <p>比較に十分な評価件数がありません。記録が増えると根拠付きで傾向を表示します。</p>}
      </section>
    </>}

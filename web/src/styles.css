@@ -768,3 +768,47 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 .international-test-toggle input{accent-color:#876b34}
 @media(max-width:600px){.international-experience{grid-template-columns:1fr}
 .international-test-note{grid-column:1/-1}}
+
+/* Beer / wine sensory descriptors: multi-choice, 5-point axes, and drill-through */
+.international-sensory{margin:21px 0 15px;padding:19px;border:1px solid #dae9dc;border-radius:12px;background:#f8fbf7}
+.international-sensory-heading h3{font-family:'Noto Serif JP',serif;font-size:18px;color:#31583a}
+.international-sensory-heading p,.international-sensory-axes>p{font-size:11px;line-height:1.8;color:#7d9282;margin:8px 0 18px}
+.international-descriptor-fieldset,.international-sensory-axes{border:0;padding:0;min-width:0;margin:21px 0}
+.international-descriptor-fieldset legend,.international-sensory-axes legend{font-size:14px;font-weight:700;color:#325c3c;margin-bottom:8px;width:100%}
+.international-descriptor-fieldset legend span,.international-sensory-axes legend span{font-size:10px;color:#879d8b;margin-left:8px;font-weight:400}
+.international-descriptor-group{margin:11px 0 16px}
+.international-descriptor-group p{font-size:11px;color:#799180;margin:0 0 7px}
+.international-descriptor-chips{display:flex;gap:7px;flex-wrap:wrap}
+.international-descriptor-chips button,.international-sensory-tag{border:1px solid #cbdccb;border-radius:30px;background:#fff;padding:8px 12px;min-height:42px;font-size:12px;color:#4e7156;line-height:1.4;display:inline-flex;align-items:center;justify-content:center;white-space:normal;overflow-wrap:anywhere}
+.international-descriptor-chips button[aria-pressed=true]{background:#2f6040;border-color:#2f6040;color:#fff;font-weight:700}
+.international-descriptor-chips button:hover,.international-descriptor-chips button:focus-visible{border-color:#518961;outline-offset:2px}
+.international-sensory-axes{margin-top:20px;border-top:1px solid #dfebde;padding-top:20px}
+.international-axis-editor{display:grid;grid-template-columns:minmax(0,1fr) minmax(155px,1.25fr);align-items:center;gap:10px;padding:13px 0;border-bottom:1px solid #e0eadf}
+.international-axis-label{display:flex;flex-direction:column;gap:5px}
+.international-axis-label strong{color:#345e3f;font-size:13px}
+.international-axis-label small,.international-axis-hint{color:#8ca18d;font-size:10px;line-height:1.7}
+.international-axis-options{display:flex;gap:6px}
+.international-axis-options button{flex:1;min-width:0;min-height:43px;background:#fff;border:1px solid #cadeca;border-radius:7px;color:#507459;font-size:13px;font-weight:650}
+.international-axis-options button[aria-pressed=true]{background:#386c49;border-color:#386c49;color:#fff}
+.international-axis-hint{grid-column:1/-1}
+.international-detail-sensory{margin:12px 0 18px;padding:13px;border-radius:9px;background:#f6f9f3;display:flex;flex-direction:column;gap:16px}
+.international-detail-sensory h4{font-size:12px;color:#517458;margin-bottom:8px}
+.international-detail-sensory .international-sensory-tag{min-height:auto;padding:6px 11px;font-size:11px;background:#e8f2e6;border-color:#cde1cb;color:#3d6e47}
+.international-detail-sensory section>p{margin:8px 0!important;color:#426f4a;font-size:12px!important}
+.international-detail-sensory section>p small{color:#7d9580;font-size:10px}
+.international-axes-panel{grid-column:1/-1}
+.international-axis-summary{width:100%;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(50px,1fr) 60px 16px;gap:13px;align-items:center;text-align:left;background:transparent;border:0;border-bottom:1px solid #e4eee2;padding:13px 3px;color:#3b714a}
+.international-axis-summary:hover:enabled,.international-axis-summary:focus-visible:enabled{background:#f1f7ef}
+.international-axis-summary:disabled{opacity:.5;cursor:default}
+.international-axis-summary span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.international-axis-summary span strong{font-size:13px;overflow-wrap:anywhere}
+.international-axis-summary span small{font-size:10px;color:#8ba28f}
+.international-axis-summary i{height:10px;border-radius:6px;overflow:hidden;background:#edf3ea}
+.international-axis-summary i b{display:block;height:100%;background:#669874;border-radius:6px}
+@media(max-width:650px){
+ .international-sensory{padding:13px}
+ .international-axis-editor{grid-template-columns:1fr;gap:8px}
+ .international-descriptor-chips{gap:6px}
+ .international-descriptor-chips button{min-height:44px}
+ .international-axis-summary{grid-template-columns:minmax(0,1fr) minmax(45px,0.8fr) 44px 13px;gap:7px}
+}

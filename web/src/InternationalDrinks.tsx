@@ -14,6 +14,7 @@ import {EMPTY_CHINA_OSM,normalizeOsmSnapshot} from './internationalOsm';
 import type {ChinaOsmSnapshot,OsmFacility} from './internationalOsm';
 import InternationalProducerMap from './InternationalProducerMap';
 import InternationalInsights from './InternationalInsights';
+import {INTERNATIONAL_SENSORY,splitDescriptorTags,toggleDescriptorTag} from './internationalSensory';
 
 const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
 interface Props {token:string;storage:StorageInfo|null;onConnect:()=>void}
@@ -73,6 +74,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [lastSearch,setLastSearch]=useState(0);
  const [section,setSection]=useState<'new'|'collection'|'map'|'insights'>('new');
  const config=KIND_CONFIG.find(c=>c.id===kind)!;
+ const sensory=INTERNATIONAL_SENSORY[kind];
  const filtered=useMemo(()=>BRAND_STARTERS.filter(b=>brandMatches(b,kind,query)).slice(0,15),[kind,query]);
  const masterMatches=useMemo(()=>chinaMasterSearch(master.rows,kind,query,30),[master.rows,kind,query]);
  const own=useMemo(()=>records.filter(r=>filter==='all'||r.kind===filter),[records,filter]);
@@ -111,6 +113,8 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const swap=(next:BeverageKind)=>{setKind(next);setData(initial(next));setQuery('');setOffResults([]);setOffState('idle');setPhoto(null);setSelected('');setError('');};
  const setField=(key:string,value:string)=>setData(d=>({...d,[key]:value}));
  const setAttribute=(key:string,value:string)=>setData(d=>({...d,attributes:{...d.attributes,[key]:value}}));
+ const toggleSense=(field:'aromaTags'|'tasteTags',tag:string)=>setData(d=>({...d,
+   attributes:{...d.attributes,[field]:toggleDescriptorTag(d.attributes[field]||'',tag)}}));
  const pickFromMaster=(item:ChinaMasterRow)=>{
    setData(d=>({...d,
      brandName:item.class==='product'?item.name:d.brandName||item.name,
@@ -311,9 +315,42 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           <label>評価（任意・UXTESTは仮の数値）<select value={data.rating} onChange={e=>setField('rating',e.target.value)}>
             <option value="">未評価</option>{[1,2,3,4,5].map(n=><option key={n} value={n}>{n}点</option>)}</select></label>
         </div>}
+        {sensory&&<section className="international-sensory" aria-label={config.name+'の香りと味わい'}>
+          <div className="international-sensory-heading"><h3>香り・味わいを記録</h3>
+            <p>感じた特徴をタップして複数選択。未確認の特徴は選択せずに保存できます。定番の表現を酒類ごとに表示します。</p></div>
+          {(['aroma','taste'] as const).map(type=>{
+            const key=type==='aroma'?'aromaTags':'tasteTags';
+            const selected=splitDescriptorTags(data.attributes[key]||'');
+            return <fieldset className="international-descriptor-fieldset" key={type}>
+              <legend>{type==='aroma'?'香りの特徴':'味わい・口当たり'} <span>複数選択可 · {selected.length}件選択</span></legend>
+              {sensory[type].map(group=><div className="international-descriptor-group" key={group.name}>
+                <p>{group.name}</p>
+                <div className="international-descriptor-chips">
+                  {group.values.map(value=><button key={value} type="button" aria-pressed={selected.includes(value)}
+                    onClick={()=>toggleSense(key,value)}>{value}</button>)}
+                </div>
+              </div>)}
+            </fieldset>;
+          })}
+          <fieldset className="international-sensory-axes">
+            <legend>味わいのバランス <span>5段階・任意</span></legend>
+            <p>1が左側、5が右側の印象です。実際に飲んでいない場合は、商品説明などで確認できる項目だけ入力してください。</p>
+            {sensory.axes.map(axis=><div className="international-axis-editor" key={axis.key}>
+              <div className="international-axis-label"><strong>{axis.label}</strong>
+                <small>{axis.low} ← → {axis.high}</small></div>
+              <div className="international-axis-options" role="group" aria-label={axis.label+'の強さ'}>
+                {[1,2,3,4,5].map(n=><button key={n} type="button" aria-pressed={data.attributes[axis.key]===String(n)}
+                    aria-label={axis.label+'：5段階の'+n} onClick={()=>setAttribute(axis.key,
+                    data.attributes[axis.key]===String(n)?'':String(n))}>{n}</button>)}
+              </div>{axis.hint&&<small className="international-axis-hint">{axis.hint}</small>}
+            </div>)}
+          </fieldset>
+        </section>}
         <div className="field-grid two">
-          <label>香りのメモ<input maxLength={600} value={data.aroma} onChange={e=>setField('aroma',e.target.value)} placeholder={kind==='baijiu'?'例：酱香、穀物香':'例：果実香、麦芽香'}/></label>
-          <label>味わいのメモ<input maxLength={600} value={data.taste} onChange={e=>setField('taste',e.target.value)} placeholder="例：甘み、酸味、余韻"/></label>
+          <label>香りの自由メモ<input maxLength={600} value={data.aroma} onChange={e=>setField('aroma',e.target.value)}
+            placeholder={sensory?'選択肢にない香りや具体的な感想を記入':'例：酱香、穀物香'}/></label>
+          <label>味わいの自由メモ<input maxLength={600} value={data.taste} onChange={e=>setField('taste',e.target.value)}
+            placeholder={sensory?'選択肢にない味や印象を記入':'例：甘み、酸味、余韻'}/></label>
         </div>
         <label>記録メモ<textarea rows={3} maxLength={2500} value={data.notes} onChange={e=>setField('notes',e.target.value)}
           placeholder="飲んでいない場合は商品情報のメモとして記録します。"/></label>
@@ -372,11 +409,28 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
          <button className="international-close" type="button" onClick={()=>setSelected('')}><X size={17}/> 閉じる</button>
          <div className="international-detail-photo"><PhotoPreview blob={chosen.photo} photoId={chosen.photoId} token={token} alt={chosen.productName+'のラベル'}/></div>
          <h3>{chosen.productName}</h3><p>{chosen.brandName} · {KIND_NAME(chosen.kind)} · {chosen.region}</p>
+         {INTERNATIONAL_SENSORY[chosen.kind]&&
+           <div className="international-detail-sensory">
+             {(['aroma','taste'] as const).map(type=>{
+               const items=splitDescriptorTags(chosen.attributes[type==='aroma'?'aromaTags':'tasteTags']||'');
+               return items.length?<section key={type}><h4>{type==='aroma'?'香りのタグ':'味わいのタグ'}</h4>
+                 <div className="international-descriptor-chips">
+                   {items.map(tag=><span className="international-sensory-tag" key={tag}>{tag}</span>)}
+                 </div></section>:null;
+             })}
+             {INTERNATIONAL_SENSORY[chosen.kind]!.axes.some(a=>chosen.attributes[a.key])&&
+               <section><h4>味わいのバランス</h4>
+                 {INTERNATIONAL_SENSORY[chosen.kind]!.axes.filter(a=>chosen.attributes[a.key])
+                   .map(axis=><p key={axis.key}><strong>{axis.label}</strong> {chosen.attributes[axis.key]} / 5
+                     <small> （{axis.low} ↔ {axis.high}）</small></p>)}
+               </section>}
+           </div>}
          <dl>
            {([['メーカー',chosen.producer],['区分',chosen.experience==='tasted'?'実際に飲んだ':chosen.experience==='test'?'UXTEST／本人未試飲':'商品情報のみ'],
              ['飲んだ日',chosen.tastedAt],['評価',chosen.rating?chosen.rating+' / 5':''],
              ['香り',chosen.aroma],['味わい',chosen.taste],
-             ...Object.entries(chosen.attributes).map(([key,v])=>
+             ...Object.entries(chosen.attributes).filter(([key])=>
+               !['aromaTags','tasteTags'].includes(key)&&!key.startsWith('axis')).map(([key,v])=>
                [KIND_CONFIG.find(c=>c.id===chosen.kind)?.fields.find(f=>f.key===key)?.label||
                  ({abv:'アルコール度数(%)',volume:'容量(mL)'} as Record<string,string>)[key]||key,v])
            ] as string[][]).filter(([,v])=>v).map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}

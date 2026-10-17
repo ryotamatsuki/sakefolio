@@ -1,11 +1,16 @@
 import type {InternationalRecord} from './internationalLocal.ts';
 import type {BeverageKind} from './internationalCatalog.ts';
+import {sensoryAxesFor,sensoryAxisScore,sensoryDescriptorValues} from './internationalSensory.ts';
 export type InternationalFacet='brand'|'producer'|'region'|'aromaStyle'|'sugarStyle'|'huangjiuStyle'|'beerStyle'|'bitterness'|'body'|'wineStyle'|'grapes'|'aroma'|'taste'|'rating';
 export interface FacetStat {label:string;count:number;ratedCount:number;mean:number|null}
 export interface InternationalInsight {id:string;facet:InternationalFacet;value:string;text:string;detail:string}
+export interface AxisStat {
+ key:string;label:string;low:string;high:string;mean:number|null;count:number;
+ distribution:number[];
+}
 export interface InternationalAnalyticsReport {
  total:number;tasted:number;rated:number;mean:number|null;photoCount:number;
- distribution:number[];
+ distribution:number[];axes:AxisStat[];
  facets:Partial<Record<InternationalFacet,FacetStat[]>>;
  insights:InternationalInsight[];
 }
@@ -16,14 +21,17 @@ const split=(v:string)=>[...new Set(v.split(/[,，、;；]/).map(t=>t.trim()).fi
 export const KIND_FACETS:Record<BeverageKind,{facet:InternationalFacet;label:string}[]>={
  baijiu:[{facet:'aromaStyle',label:'香型'},{facet:'aroma',label:'香りのメモ'},{facet:'taste',label:'味わいのメモ'}],
  huangjiu:[{facet:'huangjiuStyle',label:'黄酒の区分'},{facet:'sugarStyle',label:'糖度区分'},{facet:'aroma',label:'香りのメモ'},{facet:'taste',label:'味わいのメモ'}],
- beer:[{facet:'beerStyle',label:'ビアスタイル'},{facet:'bitterness',label:'苦味の印象'},{facet:'body',label:'ボディ'},{facet:'aroma',label:'香りのメモ'}],
- wine:[{facet:'wineStyle',label:'ワインの種類'},{facet:'grapes',label:'ブドウ品種'},{facet:'body',label:'ボディ'},{facet:'aroma',label:'香りのメモ'}]
+ beer:[{facet:'beerStyle',label:'ビアスタイル'},{facet:'bitterness',label:'苦味の印象'},{facet:'body',label:'ボディ'},
+  {facet:'aroma',label:'香りの特徴'},{facet:'taste',label:'味わいの特徴'}],
+ wine:[{facet:'wineStyle',label:'ワインの種類'},{facet:'grapes',label:'ブドウ品種'},{facet:'body',label:'ボディ'},
+  {facet:'aroma',label:'香りの特徴'},{facet:'taste',label:'味わいの特徴'}]
 };
 export function facetValues(r:InternationalRecord,facet:InternationalFacet,includeTests=false):string[]{
+ if(facet==='aroma'||facet==='taste')return sensoryDescriptorValues(r.attributes,
+   facet==='aroma'?r.aroma:r.taste,facet);
  const value=facet==='brand'?r.brandName:facet==='producer'?r.producer:
-  facet==='region'?r.region:facet==='rating'?String(score(r,includeTests)??''):
-  facet==='aroma'?r.aroma:facet==='taste'?r.taste:r.attributes[facet]||'';
- return ['aroma','taste','grapes'].includes(facet)?split(value):value.trim()?[value.trim()]:[];
+  facet==='region'?r.region:facet==='rating'?String(score(r,includeTests)??''):r.attributes[facet]||'';
+ return facet==='grapes'?split(value):value.trim()?[value.trim()]:[];
 }
 export function filterInternationalRecords(records:InternationalRecord[],facet:InternationalFacet,value:string,includeTests=false){
  return records.filter(r=>facetValues(r,facet,includeTests).includes(value));
@@ -48,13 +56,19 @@ export function analyzeInternational(records:InternationalRecord[],kind:Beverage
      return {label,count:items.length,ratedCount:ratings.length,mean:average(ratings)};
    }).sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'ja'));
  }
+ const axes:AxisStat[]=sensoryAxesFor(kind).map(axis=>{
+   const values=tasted.map(r=>sensoryAxisScore(r.attributes[axis.key])).filter((v):v is number=>v!==null);
+   return {key:axis.key,label:axis.label,low:axis.low,high:axis.high,
+     count:values.length,mean:average(values),
+     distribution:[1,2,3,4,5].map(n=>values.filter(v=>v===n).length)};
+ });
  const insights:InternationalInsight[]=[];
  for(const facet of dimensions){
    const relevant=tasted.filter(r=>facetValues(r,facet,includeTests).length>0);
    if(relevant.length<7)continue;
    for(const group of facets[facet]||[]){
      if(group.ratedCount<3||group.mean===null)continue;
-     const others=tasted.filter(r=>!facetValues(r,facet).includes(group.label))
+     const others=tasted.filter(r=>!facetValues(r,facet,includeTests).includes(group.label))
        .map(r=>score(r,includeTests)).filter((v):v is number=>v!==null);
      if(others.length<3)continue;
      const base=average(others)!;
@@ -62,11 +76,11 @@ export function analyzeInternational(records:InternationalRecord[],kind:Beverage
      if(Math.abs(delta)<0.35)continue;
      insights.push({id:facet+':'+group.label,facet,value:group.label,
        text:'「'+group.label+'」の評価は'+(delta>0?'比較的高め':'比較的控えめ'),
-       detail:'該当'+group.ratedCount+'件（平均'+group.mean.toFixed(2)+'点）／その他'+others.length+'件（平均'+base.toFixed(2)+'点）。差'+(delta>0?'+':'')+delta.toFixed(2)+'点。本人が評価を入力した記録のみの観察です。'});
+       detail:'該当'+group.ratedCount+'件（平均'+group.mean.toFixed(2)+'点）／その他'+others.length+'件（平均'+base.toFixed(2)+'点）。差'+(delta>0?'+':'')+delta.toFixed(2)+'点。UXTESTを含めた場合は実際の嗜好ではありません。'});
    }
  }
  insights.sort((a,b)=>a.text.localeCompare(b.text,'ja'));
  return {total:subset.length,tasted:tasted.length,rated:allRated.length,mean,
-  photoCount:subset.filter(r=>r.photo!==null).length,
-  distribution:[1,2,3,4,5].map(v=>allRated.filter(x=>x===v).length),facets,insights};
+  photoCount:subset.filter(r=>r.photo!==null||!!r.photoId).length,
+  distribution:[1,2,3,4,5].map(v=>allRated.filter(x=>x===v).length),axes,facets,insights};
 }
