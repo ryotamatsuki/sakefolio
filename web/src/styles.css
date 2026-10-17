@@ -288,3 +288,88 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 .brewery-map-actions a:first-child{background:#255639;color:#fff;border-color:#255639}
 .brewery-map-panel>p{font-size:11px;color:#788b78;line-height:1.7}
 @media(max-width:760px){.brewery-map-panel{padding:13px}.brewery-map-actions a{width:100%}.brewery-suggestions button{min-height:50px}}
+
+
+/* Sakefolio: private brewery atlas. The only remote map resources are visible OSM tiles. */
+.sake-atlas{margin-top:23px}
+.sake-atlas__intro{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:21px}
+.sake-atlas__intro h2{color:#23422e;font-family:'Noto Serif JP',serif;font-size:clamp(20px,2.6vw,30px);margin:9px 0 11px}
+.sake-atlas__intro p{color:#708675;font-size:12px;line-height:1.9;max-width:640px}
+.sake-atlas__eyebrow{font-size:10px;letter-spacing:1.8px;color:#6d916f;font-weight:700}
+.sake-atlas__summary{display:grid;grid-template-columns:repeat(2,minmax(70px,1fr));align-items:center;column-gap:17px;row-gap:2px;border-left:1px solid #d8e3d5;padding-left:24px;text-align:center;flex-shrink:0}
+.sake-atlas__summary strong{font-size:28px;color:#235234}
+.sake-atlas__summary strong small{font-size:12px;margin-left:3px}
+.sake-atlas__summary span{font-size:10px;color:#7c927f}
+.sake-atlas__map{height:440px;position:relative;overflow:hidden;border-radius:18px;border:1px solid #cadbc8;background:#dce9e0;isolation:isolate}
+.sake-atlas__surface{position:absolute;inset:0;overflow:hidden;touch-action:none;cursor:grab;user-select:none}
+.sake-atlas__surface:active{cursor:grabbing}
+.sake-atlas__tile{position:absolute;top:0;left:0;width:256px;height:256px;max-width:none;pointer-events:none;user-select:none}
+.sake-atlas__marker{position:absolute;z-index:3;transform:translate(-50%,-50%);display:grid;place-items:center;width:36px;height:36px;border:3px solid white;border-radius:50%;background:#315a3c;box-shadow:0 2px 9px #193e2d60;color:#fff;font-weight:800;font-size:13px;touch-action:manipulation}
+.sake-atlas__marker.active{outline:3px solid #e1c874;outline-offset:2px;z-index:5}
+.sake-atlas__marker.approximate{background:#f3e5b9;color:#665528;border:2px dashed #8d7527;box-shadow:0 0 0 7px #f3e5b955}
+.sake-atlas__marker.address{background:#638768}
+.sake-atlas__marker.verified{background:#20553a}
+.sake-atlas__marker:hover{filter:brightness(1.08)}
+.sake-atlas__controls{position:absolute;z-index:6;top:16px;right:16px;display:flex;flex-direction:column;gap:6px}
+.sake-atlas__controls button{min-width:42px;min-height:42px;background:#fffefa;border:1px solid #ccd8c9;border-radius:8px;color:#285336;box-shadow:0 3px 10px #243b2b2b;font-weight:750}
+.sake-atlas__controls button:last-child{font-size:11px}
+.sake-atlas__attribution{position:absolute;z-index:7;right:7px;bottom:7px;padding:4px 8px;border-radius:4px;background:#ffffffea;font-size:10px;color:#4a5f50}
+.sake-atlas__attribution a{text-decoration:underline}
+.sake-atlas__no-markers{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);z-index:5;background:#fffdf8f4;border:1px solid #dfebe0;border-radius:13px;padding:21px;text-align:center;width:min(86%,410px);box-shadow:0 8px 22px #244b2b20;pointer-events:auto}
+.sake-atlas__no-markers strong{font-family:'Noto Serif JP',serif;font-size:18px}
+.sake-atlas__no-markers p{font-size:12px;color:#68806e;line-height:1.7;margin:9px 0}
+.sake-atlas__no-markers button{padding:10px 14px;background:#285839;color:white;border:0;border-radius:8px;font-weight:700;font-size:12px}
+.sake-atlas__legend{display:flex;justify-content:flex-end;gap:18px;flex-wrap:wrap;margin:13px 0 23px}
+.sake-atlas__legend span{display:flex;align-items:center;gap:7px;color:#68806b;font-size:11px}
+.sake-atlas__legend-dot{display:inline-block;width:13px;height:13px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px #809783}
+.sake-atlas__legend-dot.verified{background:#20553a}
+.sake-atlas__legend-dot.address{background:#638768}
+.sake-atlas__legend-dot.approximate{background:#f3e5b9;border:2px dashed #8d7527;box-shadow:none}
+.sake-atlas__details{display:grid;grid-template-columns:310px minmax(0,1fr);gap:18px;align-items:start}
+.sake-atlas__places,.sake-atlas__memory{background:#fff;border:1px solid #e2e9de;border-radius:15px;overflow:hidden}
+.sake-atlas__places{max-height:660px;overflow-y:auto}
+.sake-atlas__places h3{font-size:15px;padding:17px 17px 13px;border-bottom:1px solid #e8eee5;color:#294a34}
+.sake-atlas__place{width:100%;border:0;border-bottom:1px solid #edf0e9;background:white;padding:14px 15px;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sake-atlas__place:last-child{border-bottom:0}
+.sake-atlas__place.active{background:#edf5ea;box-shadow:inset 4px 0 #2d7044}
+.sake-atlas__place span{display:flex;flex-direction:column;gap:6px;min-width:0}
+.sake-atlas__place strong{font-size:13px;color:#31513b;overflow-wrap:anywhere}
+.sake-atlas__place small{font-size:10px;color:#84998a}
+.sake-atlas__place em{font-size:10px;font-style:normal;color:#607965;background:#f0f5ef;padding:4px 6px;border-radius:5px;white-space:nowrap}
+.sake-atlas__place.active em{background:#dcebd9}
+.sake-atlas__empty-list{padding:19px;color:#839486;font-size:12px}
+.sake-atlas__memory{min-height:240px;padding:24px}
+.sake-atlas__memory-header h3{font-family:'Noto Serif JP',serif;font-size:25px;color:#2b4c33;margin:8px 0}
+.sake-atlas__memory-header p{font-size:12px;line-height:1.8;color:#7d917e;overflow-wrap:anywhere}
+.sake-atlas__precision{display:inline-block;background:#f0f5ea;border-radius:6px;padding:7px 9px;margin-top:10px;font-size:11px;line-height:1.6;color:#416b47}
+.sake-atlas__memory-actions{display:flex;flex-wrap:wrap;gap:8px;margin:17px 0 23px}
+.sake-atlas__memory-actions a,.sake-atlas__memory-actions button{border:1px solid #c5dbc5;background:#fff;border-radius:8px;color:#2c6040;padding:10px 12px;font-weight:700;font-size:11px;min-height:40px}
+.sake-atlas__memory-actions button{background:#2c5a39;color:#fff;border-color:#2c5a39}
+.sake-atlas__memory h4{color:#3c5a40;margin-bottom:14px;font-size:13px}
+.sake-atlas__memories{display:grid;gap:11px;max-height:520px;overflow-y:auto}
+.sake-atlas__memory-card{display:grid;grid-template-columns:85px 1fr;gap:14px;align-items:start;background:#f8faf6;border:1px solid #ebeee6;border-radius:10px;padding:9px;min-width:0}
+.sake-atlas__memory-photo{width:85px;height:95px;border-radius:6px;overflow:hidden;background:#e9eee7;display:grid;place-items:center;font-size:10px;color:#78907b}
+.sake-atlas__memory-photo .photo-fallback{min-height:95px}
+.sake-atlas__memory-card>div:last-child{display:flex;flex-direction:column;gap:5px;min-width:0}
+.sake-atlas__memory-card time{font-size:10px;color:#889a87}
+.sake-atlas__memory-card strong{font-size:13px;color:#2c4e35;overflow-wrap:anywhere}
+.sake-atlas__memory-card span{font-size:11px;color:#718573}
+.sake-atlas__memory-card p{font-size:11px;line-height:1.65;color:#536b58;overflow-wrap:anywhere}
+.sake-atlas__empty-memory{font-size:13px;color:#78917c;line-height:1.7}
+.sake-atlas__warning,.sake-atlas__loading{padding:13px 16px;background:#faf3dd;border-radius:9px;font-size:12px;line-height:1.7;color:#7d652b;margin-bottom:13px}
+.sake-atlas__warning{margin-top:17px}
+.sake-atlas__footnote{font-size:11px;line-height:1.9;color:#748a79;margin-top:16px}
+@media(max-width:760px){
+ .sake-atlas__intro{align-items:flex-start;flex-direction:column;gap:13px}
+ .sake-atlas__intro h2{font-size:23px}
+ .sake-atlas__summary{border-left:0;border-top:1px solid #d8e3d5;padding:10px 0 0;width:100%;justify-items:center}
+ .sake-atlas__map{height:370px;border-radius:12px}
+ .sake-atlas__details{grid-template-columns:1fr}
+ .sake-atlas__places{max-height:220px}
+ .sake-atlas__memory{padding:17px}
+ .sake-atlas__legend{justify-content:flex-start;gap:11px}
+ .sake-atlas__legend span{font-size:10px}
+ .sake-atlas__attribution{font-size:9px}
+ .sake-atlas__controls{top:9px;right:9px}
+ .sake-atlas__controls button{min-width:39px;min-height:39px}
+}

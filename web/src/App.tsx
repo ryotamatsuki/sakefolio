@@ -8,6 +8,8 @@ import {
 import type { SaveAttempt } from './google';
 import { validateRecordInput } from './security';
 import type { Brand, RecordEntry, StorageInfo } from './types';
+import type { BreweryCoordinate } from './breweryMapModel';
+import BreweryMap from './BreweryMap';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
@@ -53,6 +55,8 @@ function SectionEyebrow({ children }: { children: ReactNode }) {
 export default function App() {
   const [tab, setTab] = useState<Tab>('home');
   const [catalog, setCatalog] = useState<Brand[]>([]);
+  const [breweryCoordinates, setBreweryCoordinates] = useState<BreweryCoordinate[]>([]);
+  const [coordinateStatus, setCoordinateStatus] = useState<'loading'|'loaded'|'error'>('loading');
   const [manualBrands, setManualBrands] = useState<Brand[]>([]);
   const [records, setRecords] = useState<RecordEntry[]>([]);
   const [token, setToken] = useState('');
@@ -91,6 +95,13 @@ export default function App() {
 
   useEffect(() => {
     loadBrands().then(setCatalog).catch(err => setMessage(String(err.message || err)));
+    fetch(import.meta.env.BASE_URL + 'brewery-coordinates.json')
+      .then(response => { if(!response.ok) throw new Error('酒蔵座標を取得できません。'); return response.json(); })
+      .then((rows:unknown) => {
+        if(!Array.isArray(rows)) throw new Error('酒蔵座標データの形式が不正です。');
+        setBreweryCoordinates(rows as BreweryCoordinate[]);
+        setCoordinateStatus('loaded');
+      }).catch(()=>setCoordinateStatus('error'));
   }, []);
   useEffect(() => {
     let active = true;
@@ -208,16 +219,7 @@ export default function App() {
     const nums = records.map(r => Number(r.rating)).filter(r=>Number.isFinite(r)&&r>0);
     return nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(1) : '—';
   },[records]);
-  const places = useMemo(() => {
-    const map = new Map<string, {breweryName:string; prefecture:string; municipality:string; address:string; count:number}>();
-    records.forEach(r => {
-      const key = [r.breweryName,r.prefecture,r.municipality].join('|');
-      const value = map.get(key);
-      if (value) value.count++;
-      else map.set(key,{breweryName:r.breweryName,prefecture:r.prefecture,municipality:r.municipality,address:r.breweryAddress,count:1});
-    });
-    return [...map.values()].sort((a,b)=>a.prefecture.localeCompare(b.prefecture,'ja')||a.breweryName.localeCompare(b.breweryName,'ja'));
-  },[records]);
+
 
   const navigation: {tab:Tab; title:string; icon:typeof BookOpen}[] = [
     {tab:'home',title:'コレクション',icon:BookOpen},
@@ -302,7 +304,7 @@ export default function App() {
           <div className="stats-grid">
             <div className="stat-box"><div className="stat-icon"><BookOpen size={20}/></div><strong>{records.length}</strong><span>飲んだ記録</span></div>
             <div className="stat-box"><div className="stat-icon"><Wine size={20}/></div><strong>{new Set(records.map(r=>r.brandName)).size}</strong><span>出会った銘柄</span></div>
-            <div className="stat-box"><div className="stat-icon"><MapPin size={20}/></div><strong>{prefCount}</strong><span>訪ねた産地</span></div>
+            <div className="stat-box"><div className="stat-icon"><MapPin size={20}/></div><strong>{prefCount}</strong><span>出会った産地</span></div>
             <div className="stat-box"><div className="stat-icon"><Star size={20}/></div><strong>{avgRating}</strong><span>平均評価</span></div>
           </div>
           <div className="subheading-row"><h3>最近の記録</h3><span>{records.length ? 'NEWEST FIRST' : 'YOUR COLLECTION STARTS HERE'}</span></div>
@@ -585,22 +587,19 @@ export default function App() {
 
       {tab==='places' && <section className="page-section interior-section">
         <div className="interior-head"><SectionEyebrow>ORIGIN & TERROIR</SectionEyebrow>
-          <h1>酒蔵と産地<span className="green-period">.</span></h1>
-          <p>あなたの記録から酒蔵をたどります。住所が分からない場合は、Googleマップの検索結果で所在地を確認してください。</p></div>
-        <div className="places-banner"><div><MapPin size={29}/><h2>お酒を知る。<br/>土地を知る。</h2>
-          <p>日本の酒蔵には、それぞれの土地と歴史があります。</p></div>
-          <div className="map-pattern" aria-hidden="true">日本酒<span>×</span>旅</div></div>
-        {places.length ? <div className="places-list">{places.map(p => <article className="place-row" key={[p.breweryName,p.prefecture,p.municipality].join('|')}>
-          <span className="place-pin"><MapPin size={19}/></span><div><h3>{p.breweryName || '酒蔵名未登録'}</h3>
-          <p>{[p.prefecture,p.municipality].filter(Boolean).join(' · ') || '所在地未登録'} · 記録 {p.count} 件</p></div>
-          <a href={breweryMapsUrl(p.breweryName,p.prefecture,p.municipality,p.address)}
-            target="_blank" rel="noopener noreferrer">Googleマップ <ExternalLink size={16}/></a>
-        </article>)}</div> : <div className="empty-state"><MapPin size={33} strokeWidth={1.4}/>
-          <h3>酒蔵マップは、最初の記録から。</h3>
-          <p>記録した酒蔵と市町村がここに表示され、Googleマップで場所を探せます。</p>
-          <button className="button button-dark" type="button" onClick={()=>goto('record')}>日本酒を記録する <ArrowRight size={16}/></button>
-        </div>}
-        <p className="map-disclaimer">※ 地図リンクはGoogleマップの名称・住所検索です。検索候補が同名の別の酒蔵の場合もあるため、所在地は確認してください。緯度経度は未推測です。</p>
+          <h1>私の日本酒地図<span className="green-period">.</span></h1>
+          <p>飲んだ日本酒と、その酒を造った蔵元の場所を結びます。地図のピンからラベル写真・評価・味わいの記録を振り返れます。</p>
+        </div>
+        {coordinateStatus==='loading'&&<p className="sake-atlas__loading" role="status">酒蔵の位置情報を読み込んでいます。</p>}
+        {coordinateStatus==='error'&&<p className="sake-atlas__warning" role="alert">酒蔵の位置データを読み込めませんでした。酒蔵名からのGoogleマップ検索は利用できます。</p>}
+        <BreweryMap records={records} locations={breweryCoordinates}
+          renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
+          onRecordBrewery={g=>{
+            selectBrewery({name:g.breweryName,prefecture:g.prefecture,
+              municipality:'',address:g.address||g.coordinate?.address||'',count:0});
+            goto('record');
+          }}
+          onExplore={()=>goto('explore')}/>
       </section>}
     </main>
 

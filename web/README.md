@@ -2,7 +2,7 @@
 
 既存AppSheetは変更しない。React + TypeScript + Viteで独自デザインを実装。専用サーバーや独自データベース不要。Google OAuthのdrive.fileスコープだけを要求し、利用者本人のGoogle SheetsとGoogle Driveに直接保存します。
 
-現状は実装コードです。Google OAuthの設定、実際のGoogleアカウントによる保存試験、公開デプロイはまだ完了していません。
+公開テスト版では本人Googleアカウントで新規保存・写真再表示・再認証をChromeで確認済み。iPhone Safari実機・異なるGoogleアカウントの分離・包括的セキュリティ試験は未完了です。mainへのマージはしていません。
 
 ## 無料で起動する
 
@@ -51,7 +51,7 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 - Googleアクセストークンはブラウザメモリ（React state）だけ。localStorage、サーバー、GitHubには保存しません。期限切れ時は再認可が必要です。
 - 画像は本人のDriveに非公開保存。写真表示はアクセストークンを付けたAPIレスポンスから生成し、共有公開URLは作りません。
 - 新しいレビューの記録はSheetsとDriveへの複数API書き込みなので、障害時のトランザクション・ロールバックはまだありません。孤立した商品・写真が残ることがあります。
-- 写真は1件1枚（最大10MB）。編集・削除・オフライン利用、共有・SNS・AI認識、地図上への正確なピン設置、AppSheetデータ移行は未実装。
+- 写真は1件1枚（最大10MB）。編集・削除・オフライン利用、共有・SNS・AI認識、醸造所建物の実測位置の保証、AppSheetデータ移行は未実装。
 - アプリ実行時のXSSや依存ライブラリの脆弱性対策と、Google API/保存容量の制限管理が別途必要。
 
 ## 受入テスト（すべて未実施）
@@ -82,3 +82,14 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 - パイプライン: `scripts/geocode-breweries.mjs`, `.github/workflows/sakefolio-geocode.yml`。`public/brewery-addresses.json` から再生成可能です。
 - データ出典: [SAKEOpenData](https://github.com/Code-for-SAKE/SAKEOpenData) (MIT), [Geolonia 住所データ v2](https://github.com/geolonia/japanese-addresses-v2) (CC BY 4.0, 元データ: デジタル庁「アドレス・ベース・レジストリ」)。Googleマップから座標を抽出・スクレイピングしていません。
 - 未解決の酒蔵について、実際の建物位置が検証できる公的施設情報や蔵元の住所確認を追加することで精度をさらに高められます。公開Jageocoderデモへの大量リクエストは行いません。
+
+
+## Sakefolio 私の日本酒地図（2026-10-17）
+- テストブランチ `test/sakefolio-pages-preview` の「私の日本酒地図」に、ログイン中の利用者自身が記録した酒蔵の位置だけを地図表示します。個人データはGoogle Sheets/Driveから読み取り、地図タイルへ飲酒記録・写真・評価を送信しません。
+- 地図で酒蔵を選択すると、その蔵の飲酒履歴とラベル写真・評価・感想を表示します。住所検索、Googleマップでの道案内、既存酒蔵の再記録への導線も備えます。
+- `brewery-coordinates.json` の座標（当初897件）を酒蔵名＋都道府県で厳格に照合。重複、範囲外、精度不明の座標はピン化せず、住所検索へフォールバックします。
+- 位置精度は施設資料照合、地番・住居表示代表点、町丁目参考位置の3段階を明示。後二者は醸造所建物・入口の正確な位置ではなく、町丁目座標は参考位置として破線マーカー表示。
+- 背景地図はOpenStreetMap標準タイルで、表示領域に必要なタイルだけをブラウザが取得します。© OpenStreetMap contributorsの帰属表示を地図上に常時配置。位置精度は取得元の品質に依存します。
+- Google Mapsへの外部リンクは場所をユーザーが確認するためのものです。Google Mapsから座標を取得・再配布する機能ではありません。
+- 今回の機能は酒蔵に紐づく**飲酒記録の地図**です。訪問履歴や飲んだ店の場所の記録とは区別してください。
+- 単体テスト: `src/breweryMapModel.test.mjs`（自分の記録のみ、同名酒蔵の区別、重複座標の除外、精度表示、地図投影）。
