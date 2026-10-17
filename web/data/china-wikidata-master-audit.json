@@ -1,0 +1,36 @@
+{
+  "generatedAt": "2026-10-17T03:41:00.785Z",
+  "source": "https://query.wikidata.org/sparql",
+  "queries": 8,
+  "successfulQueries": 5,
+  "failures": [
+    "baijiu-product The operation was aborted due to timeout",
+    "beer-product The operation was aborted due to timeout",
+    "wine-product The operation was aborted due to timeout"
+  ],
+  "counts": {
+    "baijiu-producer-bindings": 4,
+    "baijiu-producer-accepted": 4,
+    "huangjiu-product-bindings": 0,
+    "huangjiu-product-accepted": 4,
+    "huangjiu-producer-bindings": 0,
+    "huangjiu-producer-accepted": 4,
+    "beer-producer-bindings": 8,
+    "beer-producer-accepted": 12,
+    "wine-producer-bindings": 0,
+    "wine-producer-accepted": 12,
+    "baijiu-products": 0,
+    "baijiu-producers": 4,
+    "baijiu-mapped": 0,
+    "huangjiu-products": 0,
+    "huangjiu-producers": 0,
+    "huangjiu-mapped": 0,
+    "beer-products": 0,
+    "beer-producers": 8,
+    "beer-mapped": 1,
+    "wine-products": 0,
+    "wine-producers": 0,
+    "wine-mapped": 0
+  },
+  "total": 12
+}
