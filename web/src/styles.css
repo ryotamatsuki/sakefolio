@@ -544,3 +544,15 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
  .taste-detail-sort select{max-width:205px}.taste-radar-button{width:100%}
 }
 @media(max-width:380px){.taste-record-item-end{flex-direction:column;gap:2px}.taste-record-item-main>strong{font-size:14px}}
+
+/* Prevent desktop navigation labels from breaking into vertical text on narrow tablet / desktop-site Safari viewports. */
+@media(min-width:761px) and (max-width:1050px){
+ .header-inner{padding-left:16px;padding-right:16px;gap:10px}
+ .desktop-nav{gap:12px;flex-shrink:0}
+ .desktop-nav button{white-space:nowrap;font-size:12px;padding:0 1px}
+ .brand-lockup{flex-shrink:0}
+ .brand-lockup .logo-text{font-size:20px}
+ .logo-symbol{width:29px;height:29px;flex-shrink:0}
+ .account-button{padding:9px 11px;max-width:195px}
+ .account-label{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:145px}
+}
