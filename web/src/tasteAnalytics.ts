@@ -81,7 +81,7 @@ export function analyzeTaste(records:RecordEntry[]):TasteAnalytics {
       detail:'記録した日本酒の平均評価は'+f(mean)+'点です。星4以上が'+highCount+'件あります。',
       evidence:'評価あり'+rated.length+'件／5点満点',strength:'観察',order:60});
   }
-  const dimensions:[
+  const dimensions=[
     {id:'aroma',label:'香り',category:'香り' as const,rows:groups.aromas,extract:(r:RecordEntry)=>selected(r,'aromaTagIds',aromaNames)},
     {id:'taste',label:'味わい',category:'味わい' as const,rows:groups.tastes,extract:(r:RecordEntry)=>selected(r,'tasteTagIds',tasteNames)},
     {id:'type',label:'種類',category:'スタイル' as const,rows:groups.types,extract:(r:RecordEntry)=>[normal(r.sakeType)]},
