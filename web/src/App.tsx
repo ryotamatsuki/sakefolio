@@ -589,6 +589,7 @@ export default function App() {
       </section>}
 
       {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
+        renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}
       {tab==='places' && <section className="page-section interior-section">
         <div className="interior-head"><SectionEyebrow>ORIGIN & TERROIR</SectionEyebrow>
