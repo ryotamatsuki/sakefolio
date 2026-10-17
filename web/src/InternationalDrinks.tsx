@@ -1,8 +1,8 @@
 import {useEffect,useMemo,useState} from 'react';
 import type {ChangeEvent,FormEvent} from 'react';
 import {ArrowRight,BookOpen,Camera,Download,ExternalLink,Info,MapPin,Search,ShieldCheck,Upload,Wine,X} from 'lucide-react';
-import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts} from './internationalCatalog';
-import type {BeverageKind,OffProduct} from './internationalCatalog';
+import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts,normalizeWikidataResults} from './internationalCatalog';
+import type {BeverageKind,OffProduct,WikidataCandidate} from './internationalCatalog';
 import {buildBackup,listInternationalRecords,restoreBackup,saveInternationalRecord} from './internationalLocal';
 import type {InternationalRecord} from './internationalLocal';
 
@@ -32,6 +32,9 @@ export default function InternationalDrinks(){
  const [photo,setPhoto]=useState<File|null>(null);
  const [query,setQuery]=useState('');
  const [offQuery,setOffQuery]=useState('');
+ const [wikiQuery,setWikiQuery]=useState('');
+ const [wikiResults,setWikiResults]=useState<WikidataCandidate[]>([]);
+ const [wikiState,setWikiState]=useState<'idle'|'loading'|'error'|'done'>('idle');
  const [offResults,setOffResults]=useState<OffProduct[]>([]);
  const [offState,setOffState]=useState<'idle'|'loading'|'error'|'done'>('idle');
  const [busy,setBusy]=useState(false);
@@ -57,6 +60,19 @@ export default function InternationalDrinks(){
  const pick=(name:string,region:string,source='')=>{
    setData(d=>({...d,brandName:name,productName:name,region:region||d.region,sourceUrl:source}));
    setQuery(name);
+ };
+ const searchWiki=async()=>{
+   const q=wikiQuery.trim();
+   if(q.length<2){setError('Wikidataの検索語を2文字以上入力してください。');return;}
+   setWikiState('loading');setWikiResults([]);setError('');
+   try{
+     const params=new URLSearchParams({action:'wbsearchentities',search:q,language:'zh',
+       uselang:'ja',type:'item',limit:'12',format:'json',origin:'*'});
+     const response=await fetch('https://www.wikidata.org/w/api.php?'+params.toString(),{
+       signal:AbortSignal.timeout(15000),headers:{Accept:'application/json'}});
+     if(!response.ok)throw new Error('HTTP '+response.status);
+     const raw:unknown=await response.json();setWikiResults(normalizeWikidataResults(raw));setWikiState('done');
+   }catch(e){setWikiState('error');setError('Wikidataに接続できませんでした。メーカー名は手動入力できます。');}
  };
  const searchOff=async()=>{
    const q=offQuery.trim();
@@ -153,6 +169,21 @@ export default function InternationalDrinks(){
           }}>
             <strong>{p.productName}</strong><span>{p.brandName||'ブランド未登録'} · {p.quantity} · EAN {p.code}</span><ArrowRight size={16}/></button>)}</div>}
         <p className="international-credits"><a href="https://world.openfoodfacts.org/" target="_blank" rel="noopener noreferrer">Open Food Facts</a> — ODbL / データ帰属。<a href="https://world.openfoodfacts.org/terms-of-use" target="_blank" rel="noopener noreferrer">再利用規約</a>。掲載データの正確性・網羅性は未保証。</p>
+        <h3>Wikidataでブランド・メーカーを照合</h3>
+        <p>Wikidataの構造化データはCC0。企業・ブランド以外も検索結果に含まれるため、説明と出典を確認してから採用してください。</p>
+        <label>ブランド・メーカー名（中国語推奨）
+          <input value={wikiQuery} onChange={e=>setWikiQuery(e.target.value)} placeholder="例：茅台"
+            onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void searchWiki();}}}/>
+        </label>
+        <button type="button" className="international-lookup" disabled={wikiState==='loading'} onClick={()=>void searchWiki()}>
+          {wikiState==='loading'?'照合中…':'Wikidataで照合'} <Search size={15}/></button>
+        {wikiState==='done'&&!wikiResults.length&&<p role="status">該当する候補はありません。</p>}
+        {!!wikiResults.length&&<div className="international-hits">
+          {wikiResults.map(x=><button type="button" key={x.id} onClick={()=>{
+            setData(d=>({...d,producer:x.label,brandName:d.brandName||x.label,sourceUrl:d.sourceUrl||x.source}));
+          }}>
+            <strong>{x.label}</strong><span>{x.description||'説明なし'} · {x.id}</span><ArrowRight size={16}/></button>)}</div>}
+        <p className="international-credits"><a href="https://www.wikidata.org/" target="_blank" rel="noopener noreferrer">Wikidata</a> — CC0、各候補のQ-IDを出典として参照できます。検索は任意・明示的に実行します。</p>
       </div>
       <form className="international-form" onSubmit={save}>
         <h2><BookOpen size={19}/> {config.name}の記録</h2>

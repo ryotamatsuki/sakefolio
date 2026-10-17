@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BRAND_STARTERS,KIND_CONFIG,brandMatches,normalizeOffProducts} from './internationalCatalog.ts';
+import {BRAND_STARTERS,KIND_CONFIG,brandMatches,normalizeOffProducts,normalizeWikidataResults} from './internationalCatalog.ts';
 import {buildBackup,validateInternationalRecord} from './internationalLocal.ts';
 
 const r=(extra={})=>({
@@ -51,4 +51,17 @@ test('unsafe URLs, embedded control chars, oversized fields rejected',()=>{
   assert.throws(()=>validateInternationalRecord(r({productName:'a\nB'})),/確認/);
   assert.throws(()=>validateInternationalRecord(r({notes:'A'.repeat(4001)})),/確認/);
   assert.throws(()=>validateInternationalRecord(r({attributes:{'__proto__': 'x',wrong$:'y'}})),/詳細項目/);
+});
+
+test('Wikidata candidate search rejects invalid Q-IDs and exposes explicit CC0 source',()=>{
+ const rows=normalizeWikidataResults({search:[
+   {id:'Q12345',label:'茅台',description:'中国企業'},
+   {id:'Q12345',label:'重複'},
+   {id:'P31',label:'プロパティ'},
+   {id:'Q98765',label:'酒類メーカー',description:'manufacturer'}
+ ]});
+ assert.equal(rows.length,2);
+ assert.equal(rows[0].source,'https://www.wikidata.org/wiki/Q12345');
+ assert.equal(rows[1].label,'酒類メーカー');
+ assert.deepEqual(normalizeWikidataResults({search:null}),[]);
 });

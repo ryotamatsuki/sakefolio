@@ -121,3 +121,6 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 - https://openfoodfacts.github.io/openfoodfacts-server/api/
 - https://openfoodfacts.github.io/openfoodfacts-server/api/tutorials/license-be-on-the-legal-side/
 - https://www.wikidata.org/wiki/Help:Data_access
+
+### Wikidataの任意検索（追加）
+- 「Wikidataでブランド・メーカーを照合」は `wbsearchentities` を中国語で検索する任意機能です。キーワードだけをWikidataに送信し、企業以外の同名項目も結果に混入するため、候補の説明・Q-IDをユーザーが確認します。Wikidataで確認された商品スペックや工場座標を自動補完する機能ではありません。CC0: https://www.wikidata.org/wiki/Wikidata:Licensing

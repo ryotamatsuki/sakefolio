@@ -72,3 +72,19 @@ export function normalizeOffProducts(input:unknown):OffProduct[]{
  }
  return result;
 }
+
+export interface WikidataCandidate {id:string;label:string;description:string;source:string}
+export function normalizeWikidataResults(input:unknown):WikidataCandidate[]{
+ if(!input||typeof input!=='object'||!('search'in input)||!Array.isArray(input.search))return [];
+ const seen=new Set<string>();const results:WikidataCandidate[]=[];
+ for(const p of input.search){
+   if(!p||typeof p!=='object'||typeof p.id!=='string'||!/^Q[1-9][0-9]{0,11}$/.test(p.id)||
+      typeof p.label!=='string'||!p.label.trim()||seen.has(p.id))continue;
+   seen.add(p.id);
+   results.push({id:p.id,label:p.label.trim().slice(0,200),
+     description:typeof p.description==='string'?p.description.trim().slice(0,300):'',
+     source:'https://www.wikidata.org/wiki/'+p.id});
+   if(results.length>=12)break;
+ }
+ return results;
+}
