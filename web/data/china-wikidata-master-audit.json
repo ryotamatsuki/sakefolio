@@ -1,12 +1,13 @@
 {
-  "generatedAt": "2026-10-17T03:41:00.785Z",
+  "generatedAt": "2026-10-17T03:46:16.618Z",
   "source": "https://query.wikidata.org/sparql",
   "queries": 8,
-  "successfulQueries": 5,
+  "successfulQueries": 4,
   "failures": [
     "baijiu-product The operation was aborted due to timeout",
     "beer-product The operation was aborted due to timeout",
-    "wine-product The operation was aborted due to timeout"
+    "wine-product wine-product HTTP 502",
+    "wine-producer wine-producer HTTP 502"
   ],
   "counts": {
     "baijiu-producer-bindings": 4,
@@ -17,8 +18,6 @@
     "huangjiu-producer-accepted": 4,
     "beer-producer-bindings": 8,
     "beer-producer-accepted": 12,
-    "wine-producer-bindings": 0,
-    "wine-producer-accepted": 12,
     "baijiu-products": 0,
     "baijiu-producers": 4,
     "baijiu-mapped": 0,
