@@ -106,26 +106,36 @@ const entities=new Map(),searched=new Map();
 let searchRuns=0,searchSuccess=0;
 async function api(params){
  const url='https://www.wikidata.org/w/api.php?'+new URLSearchParams({...params,format:'json'});
- const response=await fetch(url,{headers:{'User-Agent':'SakefolioChinaMaster/0.2 (ryotamatsuki/sakefolio)',
-   Accept:'application/json'},signal:AbortSignal.timeout(12000)});
- if(!response.ok)throw Error('Wikidata API HTTP '+response.status);
- const body=await response.json();
- if(body?.error)throw Error(String(body.error.code));
- return body;
-}
-for(const [kind,terms] of Object.entries(queriesByType)){
- for(const term of terms){
-   searchRuns++;
-   try{
-     const data=await api({action:'wbsearchentities',search:term,language:'zh',uselang:'en',type:'item',limit:'35'});
-     for(const item of data.search||[])if(/^Q[1-9]\\d*$/.test(item.id||'')){
-       if(!searched.has(item.id))searched.set(item.id,new Set());
-       searched.get(item.id).add(kind);
-     }
-     searchSuccess++;
-   }catch(error){failures.push('search-'+term+' '+String(error).slice(0,120));}
-   await sleep(200);
+ for(let attempt=0;attempt<3;attempt++){
+  const response=await fetch(url,{headers:{'User-Agent':'SakefolioChinaMaster/0.2 (ryotamatsuki/sakefolio)',
+    Accept:'application/json'},signal:AbortSignal.timeout(18000)});
+  if(response.status===429 && attempt<2){
+    const seconds=Number(response.headers.get('retry-after'))||0;
+    await sleep(Math.min(30000,Math.max(4000*(attempt+1),seconds*1000)));continue;
+  }
+  if(!response.ok)throw Error('Wikidata API HTTP '+response.status);
+  const body=await response.json();
+  if(body?.error)throw Error(String(body.error.code));
+  return body;
  }
+ throw Error('Wikidata API throttled');
+}
+// Rotate categories to give every beverage a fair chance before upstream throttling.
+const searchQueue=[];
+for(let i=0;i<Math.max(...Object.values(queriesByType).map(t=>t.length));i++)
+ for(const [kind,terms] of Object.entries(queriesByType))
+  if(terms[i])searchQueue.push({kind,term:terms[i]});
+for(const {kind,term} of searchQueue){
+ searchRuns++;
+ try{
+  const data=await api({action:'wbsearchentities',search:term,language:'zh',uselang:'en',type:'item',limit:'35'});
+  for(const item of data.search||[])if(/^Q[1-9]\d*$/.test(item.id||'')){
+   if(!searched.has(item.id))searched.set(item.id,new Set());
+   searched.get(item.id).add(kind);
+  }
+  searchSuccess++;
+ }catch(error){failures.push('search-'+term+' '+String(error).slice(0,120));}
+ await sleep(1250);
 }
 const qids=[...new Set([...searched.keys(),...raw.map(r=>r.id),
  'Q1518607','Q313542','Q5072156'])];
@@ -136,7 +146,7 @@ for(let i=0;i<qids.length;i+=45){
    for(const [qid,entity] of Object.entries(results.entities||{}))
      if(entity&&entity.type==='item')entities.set(qid,entity);
  }catch(error){failures.push('entity-batch-'+i+' '+String(error).slice(0,130));}
- await sleep(350);
+ await sleep(1400);
 }
 function claims(q,prop){
  return (entities.get(q)?.claims?.[prop]||[]).map(s=>s?.mainsnak?.datavalue?.value).filter(Boolean);
