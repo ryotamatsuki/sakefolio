@@ -1,6 +1,6 @@
 import {useEffect,useMemo,useState} from 'react';
 import type {ChangeEvent,FormEvent} from 'react';
-import {ArrowRight,BookOpen,Camera,Check,ChevronDown,Download,ExternalLink,Info,MapPin,Search,ShieldCheck,Upload,Wine,X} from 'lucide-react';
+import {ArrowRight,BookOpen,Camera,Download,ExternalLink,Info,MapPin,Search,ShieldCheck,Upload,Wine,X} from 'lucide-react';
 import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts} from './internationalCatalog';
 import type {BeverageKind,OffProduct} from './internationalCatalog';
 import {buildBackup,listInternationalRecords,restoreBackup,saveInternationalRecord} from './internationalLocal';
