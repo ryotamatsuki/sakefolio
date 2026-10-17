@@ -1,5 +1,5 @@
 import type {RecordEntry} from './types';
-import {AROMA_GROUPS,TASTE_GROUPS,SENSORY_AXES,selectedIds} from './sensory';
+import {AROMA_GROUPS,TASTE_GROUPS,SENSORY_AXES,selectedIds} from './sensory.ts';
 
 export type InsightCategory='味わい'|'香り'|'スタイル'|'産地'|'飲み方の傾向'|'記録の軌跡';
 export interface Insight {id:string;category:InsightCategory;headline:string;detail:string;evidence:string;strength:'傾向あり'|'観察';order:number}
