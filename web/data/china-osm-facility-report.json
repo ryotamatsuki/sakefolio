@@ -1,0 +1,39 @@
+{
+  "checkedAt": "2026-10-17T03:59:58.279Z",
+  "source": [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter"
+  ],
+  "scope": "Selected China beverage producing hubs only; not national coverage",
+  "license": "ODbL",
+  "areas": [
+    "青島",
+    "紹興",
+    "煙台",
+    "寧夏",
+    "貴州・仁懐",
+    "瀘州・宜賓",
+    "北京",
+    "上海"
+  ],
+  "counts": {
+    "紹興": 1,
+    "煙台": 5,
+    "貴州・仁懐": 1,
+    "北京": 0
+  },
+  "rows": 7,
+  "errors": [
+    "青島 https://overpass.kumi.systems/api/interpreter HTTP 500",
+    "青島 https://overpass-api.de/api/interpreter The operation was aborted due to timeout",
+    "紹興 https://overpass.kumi.systems/api/interpreter HTTP 500",
+    "煙台 https://overpass.kumi.systems/api/interpreter HTTP 500",
+    "寧夏 https://overpass.kumi.systems/api/interpreter HTTP 500",
+    "寧夏 https://overpass-api.de/api/interpreter HTTP 429",
+    "瀘州・宜賓 https://overpass.kumi.systems/api/interpreter HTTP 500",
+    "瀘州・宜賓 https://overpass-api.de/api/interpreter HTTP 429",
+    "上海 https://overpass.kumi.systems/api/interpreter HTTP 500",
+    "上海 https://overpass-api.de/api/interpreter The operation was aborted due to timeout"
+  ],
+  "failed": ""
+}
