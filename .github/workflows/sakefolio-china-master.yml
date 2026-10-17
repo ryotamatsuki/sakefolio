@@ -1,0 +1,46 @@
+name: Build China Wikidata master (isolated branch)
+on:
+  push:
+    branches: [feat/china-beverages-local-first]
+    paths:
+      - web/scripts/build-china-wikidata-master.mjs
+      - web/src/internationalMaster.ts
+      - .github/workflows/sakefolio-china-master.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          ref: feat/china-beverages-local-first
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Query WDQS, validate and preserve provenance
+        id: build
+        continue-on-error: true
+        run: node --experimental-strip-types web/scripts/build-china-wikidata-master.mjs
+      - name: Save audit and verified rows on the isolated branch only
+        run: |
+          test "$GITHUB_REF_NAME" = "feat/china-beverages-local-first"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/public/china-wikidata-master.json web/data/china-wikidata-master-audit.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "data: refresh verified China Wikidata master [isolated]"
+            git push origin HEAD:feat/china-beverages-local-first
+          else
+            echo "No changes to the master"
+          fi
+      - name: Report generation failure without substituting fabricated data
+        if: steps.build.outcome != 'success'
+        run: |
+          echo "Wikidata query failed or no records were returned; audit preserved and no synthetic dataset generated."
+          exit 1
