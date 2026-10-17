@@ -556,3 +556,99 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
  .account-button{padding:9px 11px;max-width:195px}
  .account-label{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:145px}
 }
+
+/* China beverages branch: standalone local-first collection, never mixed into Japanese sake Google Sheets */
+.international-page{max-width:1200px;margin:0 auto;min-height:70vh}
+.international-notice{display:flex;align-items:flex-start;gap:12px;border:1px solid #d7dfca;background:#f3f7ec;border-radius:12px;padding:17px;margin-bottom:20px;color:#386047}
+.international-notice svg{flex-shrink:0;margin-top:3px}.international-notice strong{font-size:13px}
+.international-notice p{font-size:12px;line-height:1.9;color:#70816d;margin-top:6px}
+.international-status,.international-error{border-radius:9px;padding:13px 15px;line-height:1.7;font-size:12px;margin-bottom:15px}
+.international-status{background:#eaf4e7;border:1px solid #acd0ae;color:#33553b}
+.international-error{background:#fcf1e9;border:1px solid #e3bdac;color:#8d462c}
+.international-mode{display:flex;gap:7px;margin:21px 0;border-bottom:1px solid #e1e8df}
+.international-mode button{padding:13px 16px;border:0;border-bottom:3px solid transparent;background:transparent;color:#69806d;font-size:13px;min-height:48px;font-weight:650}
+.international-mode button[aria-pressed=true]{color:#274d32;border-bottom-color:#295f3c}
+.international-kinds{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin:22px 0}
+.international-kinds button{display:flex;flex-direction:column;gap:5px;border:1px solid #dce8d8;background:#fff;color:#386143;padding:17px 14px;border-radius:12px;text-align:left;min-height:133px}
+.international-kinds button[aria-pressed=true]{background:#eaf2e7;border-color:#6b9e79;box-shadow:inset 0 0 0 1px #548663}
+.international-kinds button small{font-size:10px;letter-spacing:1.5px;color:#829c84}
+.international-kinds button strong{font-family:'Noto Serif JP',serif;font-size:17px}
+.international-kinds button span{font-size:11px;color:#78907a;line-height:1.6}
+.international-layout{display:grid;grid-template-columns:minmax(250px,0.84fr) minmax(0,1.6fr);gap:18px;align-items:start}
+.international-finder,.international-form{background:#fff;border:1px solid #e1e9dc;border-radius:14px;padding:24px;min-width:0}
+.international-finder h2,.international-form h2{font-family:'Noto Serif JP',serif;color:#2a5335;font-size:18px;display:flex;align-items:center;gap:10px;margin-bottom:19px}
+.international-finder h3{font-size:15px;color:#2d5538;margin:25px 0 9px}
+.international-finder p{font-size:11px;line-height:1.85;color:#788a7b;margin-bottom:12px}
+.international-finder label,.international-form label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:600;color:#617863;margin-bottom:14px}
+.international-finder input,.international-form input:not([type=file]),.international-form select,.international-form textarea{border:1px solid #d8e5d6;border-radius:8px;background:#fff;min-width:0;padding:12px;color:#314d37;font:inherit;font-size:13px;width:100%;line-height:1.5}
+.international-form textarea{resize:vertical}.international-form .field-grid{margin-top:12px}
+.international-hits{display:flex;flex-direction:column;gap:6px;max-height:310px;overflow-y:auto}
+.international-hits button{display:flex;align-items:center;gap:7px;border:1px solid #e5ebe2;background:#fbfcfa;border-radius:8px;padding:10px;text-align:left;width:100%;min-height:53px}
+.international-hits button:hover,.international-hits button:focus-visible{background:#eef6ec;border-color:#8cb596}
+.international-hits button strong{font-size:12px;color:#345a3b;overflow-wrap:anywhere}
+.international-hits button span{font-size:10px;color:#869b87;margin-left:auto;line-height:1.4}
+.international-hits button svg{flex-shrink:0;color:#628c69}
+.international-lookup{display:inline-flex;align-items:center;gap:9px;background:#27553a;color:white;border:0;border-radius:8px;padding:12px 14px;font-size:12px;min-height:44px;margin-bottom:14px}
+.international-lookup:disabled{opacity:.6}
+.international-credits,.international-small{font-size:10px!important;color:#8b9888!important;line-height:1.85!important}
+.international-credits a{color:#37694a;text-decoration:underline}
+.international-experience{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:20px 0}
+.international-experience button{background:#fff;border:1px solid #d7e3d5;border-radius:8px;min-height:49px;padding:10px;color:#65836c;font-size:12px}
+.international-experience button[aria-pressed=true]{background:#eaf2e7;border-color:#669772;color:#265434;font-weight:800}
+.international-form label.international-photo-upload{display:flex;flex-direction:column;gap:6px;cursor:pointer;border:1px dashed #9ab49b;background:#f8fbf7;border-radius:11px;text-align:center;align-items:center;padding:23px;margin:16px 0;color:#527557}
+.international-photo-upload span{font-size:10px;color:#91a093;overflow-wrap:anywhere}
+.international-photo-upload input[type=file]{max-width:100%;font-size:11px}
+.international-photo-clear{background:none;color:#7c5d45;border:0;font-size:12px;padding:10px}
+.international-save{min-height:52px;width:100%;justify-content:center;margin-top:13px}
+.international-backup{display:flex;gap:14px;justify-content:space-between;align-items:center;margin-bottom:19px;flex-wrap:wrap}
+.international-backup h2{font-family:'Noto Serif JP',serif;font-size:20px;color:#285039}
+.international-backup p{font-size:12px;color:#7f9181;line-height:1.7;margin-top:5px}
+.international-backup-actions{display:flex;gap:9px;flex-wrap:wrap}
+.international-backup-actions button,.international-backup-actions label{display:flex;align-items:center;gap:7px;border:1px solid #c8d8c9;border-radius:9px;background:#fff;color:#3b6b49;font-size:12px;padding:12px;min-height:45px;cursor:pointer}
+.international-backup-actions label input{display:none}
+.international-collection-filter{display:flex;overflow-x:auto;gap:8px;padding-bottom:15px}
+.international-collection-filter button{background:#fff;border:1px solid #d9e7d9;color:#688169;border-radius:30px;white-space:nowrap;padding:9px 14px;min-height:42px;font-size:12px}
+.international-collection-filter button[aria-pressed=true]{background:#2d5b3d;color:#fff}
+.international-category-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:6px 0 22px}
+.international-category-stats div{display:flex;flex-direction:column;gap:5px;background:#fff;border:1px solid #dce7da;border-radius:10px;padding:15px}
+.international-category-stats span,.international-category-stats small{font-size:10px;color:#829a85}
+.international-category-stats strong{font-size:24px;color:#386847}
+.international-empty{background:#fff;border:1px dashed #c9dbc5;text-align:center;border-radius:12px;padding:50px;color:#749475}
+.international-collection-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:15px;align-items:start}
+.international-collection-list{display:flex;flex-direction:column;gap:9px}
+.international-collection-list>button{display:flex;text-align:left;gap:13px;align-items:center;min-width:0;min-height:96px;border:1px solid #e1e9dd;border-radius:11px;background:#fff;padding:10px}
+.international-collection-list>button[aria-pressed=true]{background:#f0f7ee;border-color:#6d9d74}
+.international-collection-list>button>span:nth-child(2){display:flex;flex:1;flex-direction:column;gap:4px;min-width:0}
+.international-collection-list strong{font-size:13px;color:#315c3a;overflow-wrap:anywhere}
+.international-collection-list small{font-size:10px;line-height:1.5;color:#829685}
+.international-collection-list svg{flex-shrink:0}
+.international-thumb{width:70px;height:73px;background:#eef3eb;color:#8ba58e;border-radius:8px;display:grid;place-items:center;overflow:hidden}
+.international-thumb img{height:100%;width:100%;object-fit:contain}
+.international-record-detail{background:#fff;border:1px solid #dfe8dc;border-radius:12px;padding:17px}
+.international-close{display:flex;align-items:center;gap:5px;border:0;background:transparent;margin-left:auto;color:#819284;font-size:11px}
+.international-detail-photo{display:grid;place-items:center;background:#f3f6f0;border-radius:8px;min-height:150px;max-height:320px;margin:10px 0;color:#7e9880}
+.international-detail-photo img{width:100%;max-height:310px;object-fit:contain}
+.international-record-detail h3{font-family:'Noto Serif JP',serif;color:#315b3b;font-size:21px;margin-top:15px}
+.international-record-detail p{font-size:12px;color:#819584;line-height:1.8;margin-top:8px}
+.international-record-detail dl{margin-top:13px}
+.international-record-detail dl div{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px;border-top:1px solid #e7ece4;padding:10px 0;font-size:11px}
+.international-record-detail dt{color:#899b89}.international-record-detail dd{color:#36573e;overflow-wrap:anywhere}
+.international-record-detail .international-notes{padding:13px;background:#f6f9f4;border-radius:8px;white-space:pre-wrap}
+.international-source-link{display:flex;align-items:center;gap:9px;margin-top:13px;font-size:12px;color:#31633f}
+.international-explore-link{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#eff5e9;border-radius:10px;padding:15px 19px;margin:0 0 19px}
+.international-explore-link strong{font-size:13px;color:#3b603f}
+.international-explore-link button{background:transparent;border:0;color:#286342;font-size:12px;font-weight:800;display:flex;gap:6px;align-items:center}
+.international-footer{margin:25px 0;display:flex;align-items:flex-start;gap:8px;line-height:1.8;font-size:11px;color:#829384}
+.international-footer svg{flex-shrink:0;margin-top:3px}
+@media(min-width:761px) and (max-width:1150px){.desktop-nav{gap:10px}.desktop-nav button{font-size:11px;white-space:nowrap}}
+@media(max-width:960px){.international-layout{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:760px){
+ .international-kinds{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .international-kinds button{min-height:119px}
+ .international-finder,.international-form{padding:17px}
+ .international-category-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .international-collection-layout{grid-template-columns:minmax(0,1fr)}
+ .international-backup-actions{width:100%}
+ .international-backup-actions button,.international-backup-actions label{flex:1;justify-content:center}
+ .mobile-nav button{min-width:0;padding-left:0;padding-right:0;font-size:9px}
+}

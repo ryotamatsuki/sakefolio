@@ -11,13 +11,14 @@ import type { Brand, RecordEntry, StorageInfo } from './types';
 import type { BreweryCoordinate } from './breweryMapModel';
 import BreweryMap from './BreweryMap';
 import TasteDashboard from './TasteDashboard';
+import InternationalDrinks from './InternationalDrinks';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
 import { AROMA_GROUPS, POPULAR_AROMA_IDS, SENSORY_AXES, TASTE_GROUPS, selectedIds, tagLabels, toggleIds } from './sensory';
 import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
 
-type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights';
+type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights' | 'international';
 function todayLocal(): string {
   const date = new Date();
   return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
@@ -227,7 +228,8 @@ export default function App() {
     {tab:'explore',title:'銘柄を探す',icon:Search},
     {tab:'record',title:'記録する',icon:Plus},
     {tab:'insights',title:'嗜好分析',icon:BarChart3},
-    {tab:'places',title:'酒蔵地図',icon:MapPin}
+    {tab:'places',title:'酒蔵地図',icon:MapPin},
+    {tab:'international',title:'中国のお酒',icon:Wine}
   ];
   const goto = useCallback((next:Tab) => {
     setTab(next);setMenuOpen(false);window.scrollTo({top:0,behavior:'smooth'});
@@ -285,6 +287,7 @@ export default function App() {
               </button>
               <button className="hero-link" type="button" onClick={()=>goto('explore')}>銘柄を探す <ArrowRight size={16}/></button>
               <button className="hero-link" type="button" onClick={()=>goto('insights')}>好みを分析する <BarChart3 size={16}/></button>
+              <button className="hero-link" type="button" onClick={()=>goto('international')}>中国の白酒・紹興酒・ビール・ワイン <ArrowRight size={16}/></button>
             </div>
             <div className="hero-stat"><span>3,303</span> 銘柄のデータベースから見つける</div>
           </div>
@@ -347,6 +350,8 @@ export default function App() {
       </>}
 
       {tab==='explore' && <section className="page-section interior-section">
+        <div className="international-explore-link"><strong>中国の白酒・紹興酒・ビール・ワインを探していますか？</strong>
+          <button type="button" onClick={()=>goto('international')}>中国のお酒の記録へ <ArrowRight size={15}/></button></div>
         <div className="interior-head"><SectionEyebrow>EXPLORE JAPANESE SAKE</SectionEyebrow>
           <h1>銘柄を探す<span className="green-period">.</span></h1>
           <p>銘柄・酒蔵名・都道府県から探せます。未掲載の日本酒は記録画面で直接入力できます。</p>
@@ -588,6 +593,7 @@ export default function App() {
         </form>
       </section>}
 
+      {tab==='international' && <InternationalDrinks/>}
       {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
         renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}
@@ -612,7 +618,7 @@ export default function App() {
     <footer className="footer">
       <div className="footer-inner">
         <div className="footer-brand"><span className="logo-text">Sakefolio<span className="logo-dot">.</span></span><p>一杯を、忘れない。</p></div>
-        <div className="footer-right"><span><ShieldCheck size={15}/> 記録はあなたのGoogle Driveへ</span>
+        <div className="footer-right"><span><ShieldCheck size={15}/> 日本酒はGoogle Drive、中国酒は端末内保存</span>
           <a href="https://sakenowa.com" target="_blank" rel="noopener noreferrer">銘柄データ提供：さけのわ <ExternalLink size={12}/></a></div>
       </div>
     </footer>
