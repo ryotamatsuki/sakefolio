@@ -5,6 +5,10 @@ import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts,n
 import type {BeverageKind,OffProduct,WikidataCandidate} from './internationalCatalog';
 import {buildBackup,listInternationalRecords,restoreBackup,saveInternationalRecord} from './internationalLocal';
 import type {InternationalRecord} from './internationalLocal';
+import {EMPTY_CHINA_MASTER,chinaMasterSearch,normalizeChinaMaster} from './internationalMaster';
+import type {ChinaMaster,ChinaMasterRow} from './internationalMaster';
+import InternationalProducerMap from './InternationalProducerMap';
+import InternationalInsights from './InternationalInsights';
 
 const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
 const initial=(kind:BeverageKind)=>({
@@ -29,6 +33,8 @@ export default function InternationalDrinks(){
  const [kind,setKind]=useState<BeverageKind>('baijiu');
  const [data,setData]=useState(initial('baijiu'));
  const [records,setRecords]=useState<InternationalRecord[]>([]);
+ const [master,setMaster]=useState<ChinaMaster>(EMPTY_CHINA_MASTER);
+ const [masterStatus,setMasterStatus]=useState<'loading'|'loaded'|'unavailable'>('loading');
  const [photo,setPhoto]=useState<File|null>(null);
  const [query,setQuery]=useState('');
  const [offQuery,setOffQuery]=useState('');
@@ -44,9 +50,10 @@ export default function InternationalDrinks(){
  const [selected,setSelected]=useState<string>('');
  const [filter,setFilter]=useState<BeverageKind|'all'>('all');
  const [lastSearch,setLastSearch]=useState(0);
- const [section,setSection]=useState<'new'|'collection'>('new');
+ const [section,setSection]=useState<'new'|'collection'|'map'|'insights'>('new');
  const config=KIND_CONFIG.find(c=>c.id===kind)!;
  const filtered=useMemo(()=>BRAND_STARTERS.filter(b=>brandMatches(b,kind,query)).slice(0,15),[kind,query]);
+ const masterMatches=useMemo(()=>chinaMasterSearch(master.rows,kind,query,30),[master.rows,kind,query]);
  const own=useMemo(()=>records.filter(r=>filter==='all'||r.kind===filter),[records,filter]);
  const chosen=records.find(x=>x.id===selected);
  const load=async()=>{
@@ -54,11 +61,35 @@ export default function InternationalDrinks(){
    catch(e){setReady(false);setError(e instanceof Error?e.message:'端末内データを開けません。');}
  };
  useEffect(()=>{void load();},[]);
+ useEffect(()=>{
+   let active=true;
+   const url=import.meta.env.BASE_URL+'china-wikidata-master.json';
+   fetch(url,{cache:'no-cache'}).then(r=>{if(!r.ok)throw Error('No catalog');return r.json();})
+     .then(raw=>{
+       if(!active)return;
+       const parsed=normalizeChinaMaster(raw);
+       setMaster(parsed);setMasterStatus(parsed.rows.length?'loaded':'unavailable');
+     }).catch(()=>{if(active)setMasterStatus('unavailable');});
+   return ()=>{active=false;};
+ },[]);
  const swap=(next:BeverageKind)=>{setKind(next);setData(initial(next));setQuery('');setOffResults([]);setOffState('idle');setPhoto(null);setSelected('');setError('');};
  const setField=(key:string,value:string)=>setData(d=>({...d,[key]:value}));
  const setAttribute=(key:string,value:string)=>setData(d=>({...d,attributes:{...d.attributes,[key]:value}}));
+ const pickFromMaster=(item:ChinaMasterRow)=>{
+   setData(d=>({...d,
+     brandName:item.class==='product'?item.name:d.brandName||item.name,
+     productName:item.class==='product'?item.name:d.productName||item.name,
+     producer:item.class==='producer'?item.name:item.producerName||d.producer,
+     sourceUrl:item.source,
+     attributes:{...d.attributes,
+       producerQid:item.class==='producer'?item.id:item.producerId||'' ,
+       productQid:item.class==='product'?item.id:''}
+   }));
+   setQuery(item.name);
+ };
  const pick=(name:string,region:string,source='')=>{
-   setData(d=>({...d,brandName:name,productName:name,region:region||d.region,sourceUrl:source}));
+   setData(d=>({...d,brandName:name,productName:name,region:region||d.region,sourceUrl:source,
+     attributes:{...d.attributes,producerQid:'',productQid:''}}));
    setQuery(name);
  };
  const searchWiki=async()=>{
@@ -139,6 +170,8 @@ export default function InternationalDrinks(){
    <div className="international-mode" role="group" aria-label="記録画面の切替">
      <button type="button" aria-pressed={section==='new'} onClick={()=>{setSection('new');setSelected('');}}>商品を登録する</button>
      <button type="button" aria-pressed={section==='collection'} onClick={()=>setSection('collection')}>マイコレクション ({records.length})</button>
+     <button type="button" aria-pressed={section==='map'} onClick={()=>{setSection('map');setSelected('');}}>中国酒の地図</button>
+     <button type="button" aria-pressed={section==='insights'} onClick={()=>{setSection('insights');setSelected('');}}>酒類別分析</button>
    </div>
    {section==='new'?<>
     <div className="international-kinds" role="group" aria-label="酒類を選ぶ">
@@ -151,6 +184,16 @@ export default function InternationalDrinks(){
         <label>候補ブランド（実在するブランド名のみ）
           <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="茅台、青島、Changyuなど"/>
         </label>
+        <div className="international-master-status">
+          <strong>Wikidataの商品・メーカー候補：{master.rows.length}件</strong>
+          <span>{masterStatus==='loading'?'データを読み込み中':masterStatus==='loaded'?
+            'CC0のWikidataから生成。出典Q-IDを確認してください。':
+            '生成済みマスターを取得できません。固定候補と手動検索で操作できます。'}</span>
+        </div>
+        {!!masterMatches.length&&<div className="international-master-hits">
+          {masterMatches.map(item=><button type="button" key={item.class+item.id} onClick={()=>pickFromMaster(item)}>
+            <span><strong>{item.name}</strong><small>{item.class==='product'?'商品・銘柄':'メーカー'} · {item.id}</small></span>
+            <ArrowRight size={15}/></button>)}</div>}
         <div className="international-hits">{filtered.map(b=><button type="button" key={b.id}
           onClick={()=>pick(b.name,b.region)}>
           <strong>{b.name}</strong><span>{b.latin} · {b.region}</span><ArrowRight size={16}/></button>)}</div>
@@ -232,7 +275,10 @@ export default function InternationalDrinks(){
         <p className="international-small">Google Drive同期は未実装です。保存できたら「マイコレクション」で確認し、バックアップを作成してください。</p>
       </form>
     </div>
-   </>:<>
+   </>:section==='map'?<InternationalProducerMap master={master.rows} records={records}
+      onRecordSelect={id=>{setSelected(id);setFilter('all');setSection('collection');}}/>:
+    section==='insights'?<InternationalInsights records={records}
+      onRecordSelect={id=>{setSelected(id);setFilter('all');setSection('collection');}}/>:<>
      <div className="international-backup">
        <div><h2>端末内のコレクション</h2><p>登録 {records.length}件 · 実際に飲んだ記録 {records.filter(r=>r.experience==='tasted').length}件 · 平均評価 {avg(records)}点（評価ありの記録のみ）</p></div>
        <div className="international-backup-actions">

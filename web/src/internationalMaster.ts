@@ -59,7 +59,8 @@ export function normalizeChinaMaster(input:unknown):ChinaMaster{
     queries:typeof report.queries==='number'?report.queries:0,
     successfulQueries:typeof report.successfulQueries==='number'?report.successfulQueries:0,
     failures:Array.isArray(report.failures)?report.failures.filter((v):v is string=>typeof v==='string').slice(0,30):[],
-    counts:isObj(report.counts)?Object.fromEntries(Object.entries(report.counts).filter(([,v])=>typeof v==='number')):{}
+    counts:isObj(report.counts)?Object.fromEntries(
+      Object.entries(report.counts).filter(([,v])=>typeof v==='number')) as Record<string,number>:{}
    }
  };
 }
