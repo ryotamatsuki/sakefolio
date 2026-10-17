@@ -5,6 +5,8 @@ import {buildBackup,validateInternationalRecord} from './internationalLocal.ts';
 import {analyzeInternational,filterInternationalRecords} from './internationalAnalytics.ts';
 import {chinaMasterSearch,normalizeChinaMaster,parseWktPoint,mapProducers,wikidataMatchedLocations} from './internationalMaster.ts';
 import {normalizeOverpass,normalizeOsmSnapshot} from './internationalOsm.ts';
+import {ABV_PRESETS,VOLUME_PRESETS,normalizeVolume,normalizeAbv,volumeFromQuantity,
+ canonicalizeTechnicalSpecs,validateTechnicalSpecs,specStats} from './internationalInput.ts';
 import {INTERNATIONAL_SENSORY,splitDescriptorTags,toggleDescriptorTag,sensoryAxisScore,
  sensoryDescriptorValues} from './internationalSensory.ts';
 
@@ -225,4 +227,75 @@ test('legacy aroma text and UXTEST data are isolated from genuine tasting analys
  assert.equal(withTests.total,1);
  assert.equal(withTests.facets.aroma.find(x=>x.label==='橘香').count,1);
  assert.equal(withTests.axes[0].mean,null);
+});
+
+test('ABV and mL presets cover the four drink categories',()=>{
+ for(const kind of ['baijiu','huangjiu','beer','wine']){
+   assert.ok(VOLUME_PRESETS[kind].length>=8);
+   assert.ok(ABV_PRESETS[kind].length>=8);
+   assert.equal(new Set(VOLUME_PRESETS[kind]).size,VOLUME_PRESETS[kind].length);
+   assert.equal(new Set(ABV_PRESETS[kind]).size,ABV_PRESETS[kind].length);
+ }
+ assert.ok(VOLUME_PRESETS.beer.includes(330));
+ assert.ok(VOLUME_PRESETS.wine.includes(750));
+ assert.ok(ABV_PRESETS.baijiu.includes(53));
+ assert.ok(ABV_PRESETS.beer.includes(5.5));
+});
+test('quantity normalization accepts single containers but refuses multi-packs',()=>{
+ for(const [raw,expected] of [['330 ml','330'],['33cl','330'],['50CL','500'],
+   ['0.75 L','750'],['500毫升','500'],['1升','1000'],['1.5 litre','1500']]){
+   assert.equal(volumeFromQuantity(raw),expected,raw);
+ }
+ for(const raw of ['6 x 330 ml','6×500mL','12*500ml','330ml×6','1本500ml',
+   '2 bottles of 500ml','500g','500cc','',null]){
+   assert.equal(volumeFromQuantity(raw),null,String(raw));
+ }
+});
+test('technical constraints canonicalize scalar numeric units and reject outliers',()=>{
+ assert.equal(normalizeVolume('0750'),'750');
+ assert.equal(normalizeVolume('750.5'),null);
+ assert.equal(normalizeVolume('0'),null);
+ assert.equal(normalizeVolume('20001'),null);
+ assert.equal(normalizeAbv('5.0'),'5');
+ assert.equal(normalizeAbv('0'), '0');
+ assert.equal(normalizeAbv('100'),'100');
+ for(const raw of ['5.55','-5','101','53%','1e2','NaN']){
+   assert.equal(normalizeAbv(raw),null,raw);
+ }
+ const canon=canonicalizeTechnicalSpecs({volume:'0750',abv:'5.0',beerStyle:'ラガー'});
+ assert.deepEqual(canon,{volume:'750',abv:'5',beerStyle:'ラガー'});
+ assert.throws(()=>validateTechnicalSpecs({volume:'500mL'}),/容量/);
+ assert.throws(()=>validateTechnicalSpecs({abv:'5.555'}),/アルコール度数/);
+ assert.throws(()=>validateTechnicalSpecs({vintage:'3020'}),/ヴィンテージ/);
+ assert.throws(()=>validateInternationalRecord(r({attributes:{abv:'5.55'}})),/アルコール度数/);
+ assert.throws(()=>validateInternationalRecord(r({attributes:{volume:'330ml'}})),/容量/);
+});
+test('international alcohol and capacity aggregates use numbers, not text labels',()=>{
+ const sample=[
+  r({kind:'beer',attributes:{volume:'330',abv:'5'}}),
+  r({kind:'beer',attributes:{volume:'0500',abv:'5.5'}}),
+  r({kind:'beer',attributes:{volume:'330',abv:'5.0'}}),
+  r({kind:'beer',attributes:{}}),
+  r({kind:'wine',attributes:{volume:'750',abv:'13'}})
+ ];
+ const stats=specStats(sample.slice(0,4).map(x=>x.attributes),'volume');
+ assert.equal(stats.count,3);assert.equal(stats.mean,1160/3);
+ assert.equal(stats.frequencies[0].value,'330');assert.equal(stats.frequencies[0].count,2);
+ const report=analyzeInternational(sample,'beer');
+ assert.equal(report.specs.abv.count,3);
+ assert.equal(report.specs.abv.mean,15.5/3);
+ assert.equal(report.specs.volume.frequencies[0].value,'330');
+ assert.equal(report.facets.volume.find(x=>x.label==='330').count,2);
+ assert.equal(report.facets.abv.find(x=>x.label==='5').count,2);
+ assert.equal(filterInternationalRecords(sample.filter(x=>x.kind==='beer'),'volume','330').length,2);
+ assert.equal(analyzeInternational(sample,'wine').specs.abv.mean,13);
+});
+test('categorical style, body and bitterness use controlled options',()=>{
+ for(const kind of ['beer','wine']){
+   const config=KIND_CONFIG.find(c=>c.id===kind);
+   assert.ok(config.fields.some(f=>f.key==='body'&&f.options?.includes('ミディアム')));
+ }
+ const beer=KIND_CONFIG.find(c=>c.id==='beer');
+ assert.ok(beer.fields.some(f=>f.key==='beerStyle'&&f.options?.includes('IPA')));
+ assert.ok(beer.fields.some(f=>f.key==='bitterness'&&f.options?.includes('強い')));
 });

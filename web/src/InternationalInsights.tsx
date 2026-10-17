@@ -9,11 +9,13 @@ import {sensoryAxisScore,sensoryAxesFor} from './internationalSensory';
 
 interface Props {records:InternationalRecord[];onRecordSelect:(id:string)=>void}
 const title:Record<InternationalFacet,string>={
- brand:'銘柄',producer:'メーカー',region:'地域',aromaStyle:'白酒の香型',
+ brand:'銘柄',producer:'メーカー',region:'地域',volume:'容量',abv:'アルコール度数',aromaStyle:'白酒の香型',
  sugarStyle:'黄酒の糖度区分',huangjiuStyle:'黄酒の商品区分',
  beerStyle:'ビアスタイル',bitterness:'苦味',body:'ボディ',
  wineStyle:'ワイン区分',grapes:'ブドウ品種',aroma:'香り',taste:'味わい',rating:'評価'
 };
+const facetLabel=(facet:InternationalFacet,value:string)=>
+ facet==='volume'?value+'mL':facet==='abv'?value+'%':value;
 export default function InternationalInsights({records,onRecordSelect}:Props){
  const [kind,setKind]=useState<BeverageKind>('baijiu');
  const [drill,setDrill]=useState<{facet:InternationalFacet|'axis';value:string}|null>(null);
@@ -36,6 +38,8 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
  const dimensions=[{facet:'brand' as const,label:'よく記録する銘柄'},
    {facet:'producer' as const,label:'メーカー別'},
    {facet:'region' as const,label:'中国の産地'},
+   {facet:'volume' as const,label:'容量別（mL）'},
+   {facet:'abv' as const,label:'度数別（%）'},
    ...KIND_FACETS[kind].map(x=>({facet:x.facet,label:x.label}))];
  return <section className="international-insights">
    <div className="international-feature-head">
@@ -53,7 +57,7 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
      <button type="button" className="international-drill-back" onClick={()=>setDrill(null)}>← {KIND_NAME(kind)}の分析に戻る</button>
      <h3>{drill.facet==='axis'?
        (sensoryAxesFor(kind).find(a=>a.key===drill.value)?.label||'味わいの軸')+'の記録':
-       title[drill.facet]+'「'+drill.value+'」の内訳'}</h3>
+       title[drill.facet]+'「'+facetLabel(drill.facet,drill.value)+'」の内訳'}</h3>
      <p>日本酒とは別に記録した、{KIND_NAME(kind)}の登録 {matching.length}件</p>
      <label>並び順 <select value={sort} onChange={e=>setSort(e.target.value as typeof sort)}>
        <option value="date">登録日の新しい順</option><option value="high">高評価順</option></select></label>
@@ -72,6 +76,19 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
        <Star size={26}/><p>この酒類は飲酒記録がまだありません。商品情報だけの登録から味の好みを推測しません。</p>
      </div>:null}
      <div className="international-insight-grid">
+       <section className="international-insight-panel international-specs-panel">
+         <h3>容量・アルコール度数</h3>
+         <p>入力値をmL／%で統一して集計。値が未登録の記録は平均値から除きます。同一商品の複数記録はそれぞれ1件として計算します。</p>
+         <div className="international-spec-cards">
+           <div><small>平均アルコール度数</small>
+             <strong>{report.specs.abv.mean===null?'—':report.specs.abv.mean.toFixed(1)+'%'}</strong>
+             <span>{report.specs.abv.count}件の入力値から計算</span></div>
+           <div><small>最頻容量</small>
+             <strong>{report.specs.volume.frequencies.length?
+               report.specs.volume.frequencies[0].value+'mL':'—'}</strong>
+             <span>{report.specs.volume.count}件の入力値から計算</span></div>
+         </div>
+       </section>
        <section className="international-insight-panel">
          <h3>評価の分布</h3><p>評価あり {report.rated}件。各棒を選ぶと該当記録を表示します。</p>
          <div className="international-stars">{report.distribution.map((count,i)=><button type="button" key={i}
@@ -96,7 +113,7 @@ export default function InternationalInsights({records,onRecordSelect}:Props){
            <h3>{label}</h3>
            {rows.length?rows.map(row=><button type="button" key={row.label} className="international-facet-row"
              onClick={()=>setDrill({facet,value:row.label})}>
-             <span><strong>{row.label}</strong><small>{row.count}件 · {row.mean===null?'評価なし':row.mean.toFixed(2)+'点／'+row.ratedCount+'件'}</small></span>
+             <span><strong>{facetLabel(facet,row.label)}</strong><small>{row.count}件 · {row.mean===null?'評価なし':row.mean.toFixed(2)+'点／'+row.ratedCount+'件'}</small></span>
              <i><b style={{width:row.count/max*100+'%'}}/></i><ArrowRight size={15}/></button>):
              <p>まだこの項目の入力がありません。</p>}
          </section>;

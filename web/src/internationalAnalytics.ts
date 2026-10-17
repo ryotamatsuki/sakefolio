@@ -1,7 +1,8 @@
 import type {InternationalRecord} from './internationalLocal.ts';
 import type {BeverageKind} from './internationalCatalog.ts';
 import {sensoryAxesFor,sensoryAxisScore,sensoryDescriptorValues} from './internationalSensory.ts';
-export type InternationalFacet='brand'|'producer'|'region'|'aromaStyle'|'sugarStyle'|'huangjiuStyle'|'beerStyle'|'bitterness'|'body'|'wineStyle'|'grapes'|'aroma'|'taste'|'rating';
+import {canonicalSpec,specStats} from './internationalInput.ts';
+export type InternationalFacet='brand'|'producer'|'region'|'volume'|'abv'|'aromaStyle'|'sugarStyle'|'huangjiuStyle'|'beerStyle'|'bitterness'|'body'|'wineStyle'|'grapes'|'aroma'|'taste'|'rating';
 export interface FacetStat {label:string;count:number;ratedCount:number;mean:number|null}
 export interface InternationalInsight {id:string;facet:InternationalFacet;value:string;text:string;detail:string}
 export interface AxisStat {
@@ -11,6 +12,10 @@ export interface AxisStat {
 export interface InternationalAnalyticsReport {
  total:number;tasted:number;rated:number;mean:number|null;photoCount:number;
  distribution:number[];axes:AxisStat[];
+ specs:{
+  volume:ReturnType<typeof specStats>;
+  abv:ReturnType<typeof specStats>;
+ };
  facets:Partial<Record<InternationalFacet,FacetStat[]>>;
  insights:InternationalInsight[];
 }
@@ -30,7 +35,9 @@ export function facetValues(r:InternationalRecord,facet:InternationalFacet,inclu
  if(facet==='aroma'||facet==='taste')return sensoryDescriptorValues(r.attributes,
    facet==='aroma'?r.aroma:r.taste,facet);
  const value=facet==='brand'?r.brandName:facet==='producer'?r.producer:
-  facet==='region'?r.region:facet==='rating'?String(score(r,includeTests)??''):r.attributes[facet]||'';
+  facet==='region'?r.region:facet==='rating'?String(score(r,includeTests)??''):
+  facet==='volume'||facet==='abv'?canonicalSpec(facet,r.attributes[facet])||'':
+  r.attributes[facet]||'';
  return facet==='grapes'?split(value):value.trim()?[value.trim()]:[];
 }
 export function filterInternationalRecords(records:InternationalRecord[],facet:InternationalFacet,value:string,includeTests=false){
@@ -40,7 +47,7 @@ export function analyzeInternational(records:InternationalRecord[],kind:Beverage
  const subset=records.filter(r=>r.kind===kind&&(includeTests||r.experience!=='test'));
  const tasted=subset.filter(r=>r.experience==='tasted'||(includeTests&&r.experience==='test'));
  const allRated=tasted.map(r=>score(r,includeTests)).filter((v):v is number=>v!==null),mean=average(allRated);
- const dimensions:InternationalFacet[]=['brand','producer','region',...KIND_FACETS[kind].map(x=>x.facet)];
+ const dimensions:InternationalFacet[]=['brand','producer','region','volume','abv',...KIND_FACETS[kind].map(x=>x.facet)];
  const facets:InternationalAnalyticsReport['facets']={};
  for(const facet of dimensions){
    const groups=new Map<string,InternationalRecord[]>();
@@ -56,6 +63,8 @@ export function analyzeInternational(records:InternationalRecord[],kind:Beverage
      return {label,count:items.length,ratedCount:ratings.length,mean:average(ratings)};
    }).sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label,'ja'));
  }
+ const specs={volume:specStats(subset.map(r=>r.attributes),'volume'),
+   abv:specStats(subset.map(r=>r.attributes),'abv')};
  const axes:AxisStat[]=sensoryAxesFor(kind).map(axis=>{
    const values=tasted.map(r=>sensoryAxisScore(r.attributes[axis.key])).filter((v):v is number=>v!==null);
    return {key:axis.key,label:axis.label,low:axis.low,high:axis.high,
@@ -82,5 +91,5 @@ export function analyzeInternational(records:InternationalRecord[],kind:Beverage
  insights.sort((a,b)=>a.text.localeCompare(b.text,'ja'));
  return {total:subset.length,tasted:tasted.length,rated:allRated.length,mean,
   photoCount:subset.filter(r=>r.photo!==null||!!r.photoId).length,
-  distribution:[1,2,3,4,5].map(v=>allRated.filter(x=>x===v).length),axes,facets,insights};
+  distribution:[1,2,3,4,5].map(v=>allRated.filter(x=>x===v).length),axes,specs,facets,insights};
 }

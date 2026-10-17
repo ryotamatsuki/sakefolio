@@ -1,5 +1,6 @@
 import {detectPhotoType,verifyPhoto} from './security.ts';
 import {BEVERAGE_KINDS} from './internationalCatalog.ts';
+import {validateTechnicalSpecs} from './internationalInput.ts';
 import type {BeverageKind} from './internationalCatalog.ts';
 
 const DB='sakefolio-international-local-v1';
@@ -50,6 +51,7 @@ export function validateInternationalRecord(r:InternationalRecord):void {
  for(const [key,value] of Object.entries(r.attributes))
    if(!/^[a-zA-Z]{1,40}$/.test(key)||typeof value!=='string'||value.length>MAX_TEXT)
      throw new Error('詳細項目に不正な値があります。');
+ validateTechnicalSpecs(r.attributes);
  if(r.photoId!==undefined&&(typeof r.photoId!=='string'||r.photoId.length>200||!/^[\w-]*$/.test(r.photoId)))
    throw new Error('写真IDが不正です。');
  if(r.experience==='test'&&!r.notes.includes('UXTEST'))throw new Error('評価テストはUXTESTと明記してください。');

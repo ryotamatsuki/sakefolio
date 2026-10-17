@@ -299,6 +299,15 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           {config.fields.map(field=><label key={field.key}>{field.label}
             {field.options?<select value={data.attributes[field.key]||''} onChange={e=>setAttribute(field.key,e.target.value)}>
               {field.options.map(option=><option key={option} value={option}>{option||'未設定'}</option>)}</select>:
+              field.key==='vintage'?<>
+                <input type="number" inputMode="numeric" min="1900" max={new Date().getFullYear()+1} step="1"
+                  list="international-vintages" value={data.attributes.vintage||''} placeholder="西暦4桁"
+                  onChange={e=>setAttribute('vintage',e.target.value)}/>
+                <datalist id="international-vintages">
+                  {Array.from({length:25},(_,i)=>String(new Date().getFullYear()-i))
+                    .map(v=><option key={v} value={v}/>)}
+                </datalist>
+              </>:
               <input maxLength={200} value={data.attributes[field.key]||''} placeholder={field.placeholder}
                 onChange={e=>setAttribute(field.key,e.target.value)}/>}</label>)}
         </div>
