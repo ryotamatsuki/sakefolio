@@ -19,7 +19,11 @@ try{
  await step('compiled app loads from isolated localhost URL',async()=>{
    const resp=await page.goto(root,{waitUntil:'domcontentloaded'});
    assert.equal(resp?.status(),200);
-   await page.getByRole('button',{name:'中国のお酒'}).first().click();
+   await page.waitForTimeout(2500);
+   console.log('PAGE_BODY', (await page.locator('body').innerText()).slice(0,1500));
+   console.log('PAGE_ERRORS',JSON.stringify(evidence.errors));
+   await page.screenshot({path:dir+'/initial.png',fullPage:true});
+   await page.locator('.mobile-nav button').filter({hasText:'中国のお酒'}).click();
    await page.getByRole('heading',{name:/中国のお酒を記録する/}).waitFor();
  });
  await step('Chinese spirits save locally without Google credentials',async()=>{
@@ -32,7 +36,7 @@ try{
  await page.screenshot({path:dir+'/local-collection.png',fullPage:true});
  await step('record survives reload in same browser profile',async()=>{
    await page.reload({waitUntil:'domcontentloaded'});
-   await page.getByRole('button',{name:'中国のお酒'}).first().click();
+   await page.locator('.mobile-nav button').filter({hasText:'中国のお酒'}).click();
    await page.getByRole('button',{name:/マイコレクション/}).click();
    await page.getByText('PR3-QA-TEST-PRODUCT',{exact:false}).first().waitFor();
  });
@@ -41,7 +45,7 @@ try{
      serviceWorkers:'block'});
    const other=await second.newPage();
    await other.goto(root,{waitUntil:'domcontentloaded'});
-   await other.getByRole('button',{name:'中国のお酒'}).first().click();
+   await other.locator('.mobile-nav button').filter({hasText:'中国のお酒'}).click();
    await other.getByRole('button',{name:/マイコレクション/}).click();
    await other.getByText('この酒類の記録はまだありません',{exact:false}).waitFor();
    assert.equal(await other.getByText('PR3-QA-TEST-PRODUCT',{exact:false}).count(),0);
