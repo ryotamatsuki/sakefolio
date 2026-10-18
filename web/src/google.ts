@@ -407,48 +407,78 @@ export async function inspectStorage(token: string, storage: StorageInfo): Promi
  * the user's corrected display and analysis fields.
  */
 export async function updateReview(token:string,storage:StorageInfo,
- original:RecordEntry,changed:RecordEntry,replacement?:File|null):Promise<RecordEntry>{
+ original:RecordEntry,changed:RecordEntry,replacement?:File|null,
+ attempt:SaveAttempt={reviewId:original.reviewId}):Promise<RecordEntry>{
  if(!original.reviewId||changed.reviewId!==original.reviewId||changed.createdAt!==original.createdAt)
-  throw Error('編集する記録のIDまたは作成日時が不正です。');
+  throw Error('編集対象のIDまたは作成日時が不正です。');
  validateRecordInput(changed);
+ if(attempt.reviewId!==original.reviewId)throw Error('別の記録の保存処理を再利用できません。');
  const key=storage.spreadsheetId+':'+original.reviewId;
  if(activeSaves.has(key))throw Error('同じ記録の更新が進行中です。');
  activeSaves.add(key);
  try{
   const all=await getRows(token,storage.spreadsheetId,'Reviews');
-  if(TABLE_HEADERS.Reviews.some((h,i)=>all[0]?.[i]!==h))
-   throw Error('Reviewsの列が変更されています。');
-  const matches=all.map((row,index)=>({row,index})).filter(x=>x.index>0&&x.row[0]===original.reviewId);
-  if(matches.length!==1)throw Error('編集対象が見つからないか重複しています。');
-  const {row,index}=matches[0],keys=TABLE_HEADERS.Reviews;
-  const raw=(data:RecordEntry,k:string):string=>
-   k==='comment'?data.notes:String((data as unknown as Record<string,string>)[k]||'');
-  // A previous edit elsewhere should not be overwritten with a stale form.
-  const changedFields=keys.filter(k=>!['updatedAt'].includes(k));
-  if(changedFields.some(k=>String(row[keys.indexOf(k)]||'')!==raw(original,k)))
-   throw Error('別の画面で記録が変更されました。再読み込みしてください。');
-  // Keep system IDs and creation date unchanged, regardless of client form.
+  if(TABLE_HEADERS.Reviews.some((h,i)=>all[0]?.[i]!==h))throw Error('Reviewsの列が変更されています。');
+  const found=all.map((row,index)=>({row,index})).filter(x=>x.index>0&&x.row[0]===original.reviewId);
+  if(found.length!==1)throw Error('編集対象が見つからないか重複しています。');
+  const {row,index}=found[0],keys=TABLE_HEADERS.Reviews;
+  const originalValue=(k:string)=>k==='comment'?original.notes:
+   String((original as unknown as Record<string,string>)[k]||'');
+  const same=(expected:(k:string)=>string)=>keys.every((k,i)=>
+   k==='updatedAt'||String(row[i]||'')===expected(k));
+  // Read and verify the old revision before allocating a Drive photo ID.
+  const isOld=same(originalValue);
+  const time=attempt.startedAt ||= new Date().toISOString();
   const next:{[key:string]:string}={...changed,
     reviewId:original.reviewId,brandId:original.brandId,
     bottleId:row[keys.indexOf('bottleId')]||'',
-    photoId:original.photoId,createdAt:original.createdAt,
-    updatedAt:new Date().toISOString(),comment:changed.notes
-  };
-  if(replacement){
-   // The caller supplies the already re-encoded PNG produced by createPhotoPreview.
-   const type=await verifyPhoto(replacement);
-   if(type.mime!=='image/png')throw Error('編集写真を先にPNGへ安全変換してください。');
-   const photoId=await uploadPhoto(token,storage.photoFolderId,replacement,undefined,original.reviewId);
-   next.photoId=photoId;
+    photoId:replacement?(attempt.photoFileId||original.photoId):original.photoId,
+    createdAt:original.createdAt,updatedAt:time,comment:changed.notes};
+  // A retry after a lost response may encounter the already-saved new revision.
+  if(!isOld){
+    const matching=same(k=>next[k]||'');
+    if(matching)return {...changed,photoId:next.photoId};
+    throw Error('別の画面で記録が変更されました。再読み込みしてください。');
   }
-  const pos=index+1,body=keys.map(k=>next[k]||'');
+  if(replacement){
+    const type=await verifyPhoto(replacement);
+    if(type.mime!=='image/png')throw Error('編集写真を先にPNGへ安全変換してください。');
+    if(!attempt.photoFileId){
+      const ids=await api<{ids?:string[]}>(token,
+       'https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files');
+      if(!ids.ids?.[0])throw Error('写真IDを予約できませんでした。');
+      attempt.photoFileId=ids.ids[0];
+    }
+    const photoId=attempt.photoFileId;
+    const response=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(photoId)+
+      '?fields=id,parents,appProperties',{signal:AbortSignal.timeout(45000),
+      headers:{Authorization:'Bearer '+token}});
+    if(response.status===404){
+      await uploadPhoto(token,storage.photoFolderId,replacement,photoId,original.reviewId);
+    }else{
+      if(!response.ok)throw extractError(undefined,response.status);
+      const meta=await response.json() as {parents?:string[];appProperties?:Record<string,string>};
+      if(!meta.parents?.includes(storage.photoFolderId)||
+        meta.appProperties?.sakefolioApp!==APP_MARKER||meta.appProperties?.sakefolioKind!=='photo'||
+        meta.appProperties?.reviewId!==original.reviewId)
+         throw Error('写真の保存先が一致しません。');
+    }
+    await getPhotoBlob(token,photoId,storage.photoFolderId);
+    next.photoId=photoId;
+    // Keep a stable Photos link across retries, and retain old photos for rollback.
+    await ensureRow(token,storage,'Photos',{
+      photoId:original.reviewId+'-replacement-'+photoId,reviewId:original.reviewId,
+      imageFile:photoId,photoType:'表ラベル',capturedAt:time,aiStatus:'未解析'
+    });
+  }
+  const body=keys.map(k=>next[k]||''),pos=index+1;
   await api(token,'https://sheets.googleapis.com/v4/spreadsheets/'+storage.spreadsheetId+
     '/values/'+encodeURIComponent("'Reviews'!A"+pos+':AF'+pos)+'?valueInputOption=RAW',
     {method:'PUT',body:JSON.stringify({values:[body]})});
   const after=await getRows(token,storage.spreadsheetId,'Reviews');
   const confirmed=after.slice(1).filter(r=>r[0]===original.reviewId);
   if(confirmed.length!==1||keys.some((_,i)=>String(confirmed[0][i]||'')!==body[i]))
-   throw Error('編集結果を確認できません。最新データを読み込んでください。');
+    throw Error('編集結果を確認できません。再読み込みしてください。');
   return {...changed,photoId:next.photoId};
  }finally{activeSaves.delete(key);}
 }

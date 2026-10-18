@@ -334,3 +334,28 @@ test('Japanese review edit verifies current row, preserves ID, rejects a stale e
  await assert.rejects(google.updateReview('first',storage,original,{...original,notes:'古い編集'},null),/別の画面/);
  assert.equal(state.writes.filter(x=>x==='edit:Reviews').length,1);
 });
+
+test('photo replacement on Japanese edit is idempotent after lost Sheets update response',async()=>{
+ const state=mockGoogle();
+ await google.saveRecord('first',storage,record,[],null,{reviewId:'edited-with-photo'});
+ const original=(await google.loadRecords('first',storage))[0];
+ const amended={...original,notes:'新しい写真'};
+ const attempt={reviewId:original.reviewId};
+ const real=globalThis.fetch;
+ let lost=false;
+ globalThis.fetch=async(input,init={})=>{
+  const url=new URL(input);
+  if(!lost&&init.method==='PUT'&&url.hostname==='sheets.googleapis.com'){
+   lost=true;await real(input,init);throw new TypeError('Response lost');
+  }
+  return real(input,init);
+ };
+ await assert.rejects(google.updateReview('first',storage,original,amended,image,attempt),/通信エラー/);
+ assert.ok(attempt.photoFileId);
+ await google.updateReview('first',storage,original,amended,image,attempt);
+ const result=(await google.loadRecords('first',storage))[0];
+ assert.equal(result.notes,'新しい写真');
+ assert.equal(result.photoId,attempt.photoFileId);
+ assert.equal(state.writes.filter(x=>x==='Drive').length,1);
+ assert.equal(state.tables.Photos.length,2);
+});

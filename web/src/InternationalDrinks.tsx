@@ -432,7 +432,8 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
       <form className="international-form" onSubmit={save}>
         <h2><BookOpen size={19}/> {config.name}の{editing?'記録を編集':'記録'}</h2>
         {editing&&<button className="text-action" type="button" onClick={()=>{setEditing(null);editAttempt.current=null;setData(initial(kind));setPhoto(null);setSection('collection');}}>編集をキャンセル</button>}
-        <fieldset disabled={busy||!!pendingCloudSheet&&pendingCloudSheet===storage?.spreadsheetId} className="international-form-fields">
+        {editing&&editAttempt.current&&<p role="status">更新結果が不明な場合、同じ内容で再試行してください。内容を変える場合はいったん編集を取り消してください。</p>}
+        <fieldset disabled={busy||!!editAttempt.current||!!pendingCloudSheet&&pendingCloudSheet===storage?.spreadsheetId} className="international-form-fields">
         <div className="field-grid two">
           <label>ブランド名 <span className="required">必須</span><input required maxLength={200} value={data.brandName} onChange={e=>setField('brandName',e.target.value)} placeholder="商品に記載された銘柄名"/></label>
           <label>商品・シリーズ名 <span className="required">必須</span><input required maxLength={200} value={data.productName} onChange={e=>setField('productName',e.target.value)} placeholder="正式な商品名"/></label>

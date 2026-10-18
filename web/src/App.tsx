@@ -68,6 +68,7 @@ export default function App() {
   const [records, setRecords] = useState<RecordEntry[]>([]);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [editingRecord, setEditingRecord] = useState<RecordEntry|null>(null);
+  const editingAttempt=useRef<SaveAttempt|null>(null);
   const visibleRecords=useMemo(()=>records.filter(x=>!trash.some(t=>t.kind==='japan'&&t.id===x.reviewId)),[records,trash]);
   const [token, setToken] = useState('');
   const [storage, setStorage] = useState<StorageInfo | null>(null);
@@ -157,7 +158,7 @@ export default function App() {
   };
   const disconnect = () => {
     if (operation.current) return;
-    pendingSave.current = null;setSelectedPhoto(null);setEditingRecord(null);
+    pendingSave.current = null;setSelectedPhoto(null);setEditingRecord(null);editingAttempt.current=null;
     const current=++session.current;
     const revocation=token?revokeAccess(token):Promise.resolve({successful:true});
     setToken('');setStorage(null);setRecords([]);setTrash([]);setManualBrands([]);setAccountEmail('');
@@ -212,13 +213,14 @@ export default function App() {
     setBusy(true);setMessage('');
     try {
       const reviewId = editingRecord
-        ? (await updateReview(token,storage,editingRecord,entry,photo)).reviewId
+        ? (await updateReview(token,storage,editingRecord,entry,photo,
+             editingAttempt.current ||= {reviewId:editingRecord.reviewId})).reviewId
         : await saveRecord(token,storage,pending!.entry,brands,pending!.photo,pending!.attempt);
       if (session.current !== current) return;
       const [saved, added] = await Promise.all([loadRecords(token,storage),loadManualBrands(token,storage)]);
       if (session.current !== current) return;
       if (!saved.some(record=>record.reviewId===reviewId)) throw new Error('保存後の一覧に記録が見つかりません。同じ画面から再確認してください。');
-      pendingSave.current = null;setEditingRecord(null);
+      pendingSave.current = null;setEditingRecord(null);editingAttempt.current=null;
       setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);setSelectedPhoto(null);
       setShowAdvanced(false);setShowAllAromas(false);setAromaSearch('');setTab('home');
       setMessage(editingRecord?'既存の記録を更新しました。':'記録を保存しました。Google SheetsとDriveで確認できます。');
@@ -272,7 +274,7 @@ export default function App() {
   };
   const beginEdit=(r:RecordEntry)=>{
     if(pendingSave.current){setMessage('未完了の保存を先に再確認してください。');return;}
-    setEditingRecord(r);setEntry({...emptyEntry(),...r});setSelectedPhoto(null);setPhoto(null);
+    setEditingRecord(r);editingAttempt.current=null;setEntry({...emptyEntry(),...r});setSelectedPhoto(null);setPhoto(null);
     setShowAdvanced(true);goto('record');
   };
   const beginRetaste=(r:RecordEntry)=>{
@@ -282,7 +284,7 @@ export default function App() {
       productName:r.productName,sakeType:r.sakeType,sakeTypeOther:r.sakeTypeOther,
       heatTreatment:r.heatTreatment,brewingMethod:r.brewingMethod,processingStyles:r.processingStyles,
       riceVariety:r.riceVariety,polishingRatio:r.polishingRatio,alcoholPercent:r.alcoholPercent,vintage:r.vintage};
-    setEditingRecord(null);setEntry(next);setSelectedPhoto(null);setPhoto(null);goto('record');
+    setEditingRecord(null);editingAttempt.current=null;setEntry(next);setSelectedPhoto(null);setPhoto(null);goto('record');
   };
   const moveReview=async(r:RecordEntry)=>{
     if(!token||!storage||busy)return;
@@ -483,11 +485,12 @@ export default function App() {
       {tab==='record' && <section className="page-section interior-section form-layout">
         <div className="interior-head"><SectionEyebrow>YOUR SAKE JOURNAL</SectionEyebrow>
           <h1>{editingRecord?'日本酒の記録を編集する':'日本酒を記録する'}<span className="green-period">.</span></h1>
-          {editingRecord&&<button className="text-action" type="button" onClick={()=>{setEditingRecord(null);setEntry(emptyEntry());setSelectedPhoto(null);goto('home');}}>編集をキャンセル</button>}
+          {editingRecord&&editingAttempt.current&&<p role="status">保存結果が不明な場合、同じ内容で再試行してください。修正が必要なら編集をキャンセルして再度開いてください。</p>}
+          {editingRecord&&<button className="text-action" type="button" onClick={()=>{setEditingRecord(null);editingAttempt.current=null;setEntry(emptyEntry());setSelectedPhoto(null);goto('home');}}>編集をキャンセル</button>}
           <p>酒蔵・銘柄・商品・味わいをそれぞれ分けて保存します。分からない項目は空白のままで構いません。</p>
         </div>
         <form onSubmit={save} className="record-form">
-          <fieldset disabled={busy || !!pendingSave.current} className="record-fields">
+          <fieldset disabled={busy || !!pendingSave.current || !!editingAttempt.current} className="record-fields">
           <div className="form-block">
             <div className="form-step"><span>01</span><div><h2>どこのお酒？</h2><p>酒蔵と銘柄、産地を記録しましょう。</p></div></div>
             <div className="form-fields">
