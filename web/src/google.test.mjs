@@ -94,6 +94,13 @@ function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false
       const range=decodeURIComponent(url.pathname.split('/values/')[1]||'');
       const table=range.match(/^'([^']+)'/)?.[1];
       assert.ok(tables[table], 'unexpected table');
+      if(init.method==='PUT'){
+        const position=Number(range.match(/!A(\\d+):/)?.[1]);
+        assert.ok(position>=2&&position<=tables[table].length);
+        tables[table][position-1]=JSON.parse(init.body).values[0];
+        writes.push('edit:'+table);
+        return json({updatedCells:tables[table][position-1].length});
+      }
       if(init.method==='POST'){
         assert.equal(url.searchParams.get('valueInputOption'),'RAW');
         const values=JSON.parse(init.body).values;
@@ -312,4 +319,18 @@ test('OAuth revoke never reports success if GIS callback does not arrive',async(
   assert.equal(result.successful,false);
   assert.equal(result.error,'timeout');
  }finally{globalThis.setTimeout=old;}
+});
+
+test('Japanese review edit verifies current row, preserves ID, rejects a stale editor',async()=>{
+ const state=mockGoogle();
+ await google.saveRecord('first',storage,record,[],null,{reviewId:'edit-review'});
+ const original=(await google.loadRecords('first',storage))[0];
+ assert.equal(original.reviewId,'edit-review');
+ await google.updateReview('first',storage,original,{...original,notes:'編集した感想'},null);
+ const newer=(await google.loadRecords('first',storage))[0];
+ assert.equal(newer.notes,'編集した感想');
+ assert.equal(newer.reviewId,'edit-review');
+ assert.equal(state.writes.filter(x=>x==='edit:Reviews').length,1);
+ await assert.rejects(google.updateReview('first',storage,original,{...original,notes:'古い編集'},null),/別の画面/);
+ assert.equal(state.writes.filter(x=>x==='edit:Reviews').length,1);
 });
