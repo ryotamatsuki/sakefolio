@@ -567,7 +567,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
            {sameProductHistory(records,chosen).slice(0,8).map(x=><p key={x.id}>
              {x.tastedAt||'日付なし'} — {x.rating||'未評価'}点 — {x.notes.slice(0,70)}
            </p>)}
-         </div>
+         </div>}
          {chosen.sourceUrl&&<a className="international-source-link" href={chosen.sourceUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={15}/> 商品情報の出典を確認</a>}
          {chosen.producer&&<a className="international-source-link" target="_blank" rel="noopener noreferrer"
            href={'https://www.openstreetmap.org/search?query='+encodeURIComponent(chosen.producer+' '+chosen.region+' 中国')}><MapPin size={15}/> OpenStreetMapで場所を検索（位置未確定）</a>}
