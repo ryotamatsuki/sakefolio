@@ -3,11 +3,14 @@ import type {ChangeEvent,FormEvent} from 'react';
 import {ArrowRight,BookOpen,Camera,Download,ExternalLink,Info,MapPin,Search,ShieldCheck,Upload,Wine,X} from 'lucide-react';
 import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts,normalizeWikidataResults} from './internationalCatalog';
 import type {BeverageKind,OffProduct,WikidataCandidate} from './internationalCatalog';
-import {buildBackup,listInternationalRecords,restoreBackup,saveInternationalRecord} from './internationalLocal';
+import {buildBackup,listInternationalRecords,restoreBackup,saveInternationalRecord,replaceInternationalRecord,trashLocalInternationalRecord,restoreLocalInternationalRecord,listTrashedInternationalRecords} from './internationalLocal';
 import type {InternationalRecord} from './internationalLocal';
 import type {StorageInfo} from './types';
 import {getPhotoBlob} from './google';
-import {loadChinaCloud,saveChinaCloud} from './internationalCloud';
+import {loadChinaCloud,saveChinaCloud,updateChinaCloud} from './internationalCloud';
+import {listTrash,moveToTrash,restoreFromTrash} from './trash';
+import type {TrashEntry} from './trash';
+import {downloadCsv,sameProductHistory} from './recordArchive';
 import {EMPTY_CHINA_MASTER,chinaMasterSearch,normalizeChinaMaster} from './internationalMaster';
 import type {ChinaMaster,ChinaMasterRow} from './internationalMaster';
 import {EMPTY_CHINA_OSM,normalizeOsmSnapshot} from './internationalOsm';
@@ -16,6 +19,7 @@ import InternationalProducerMap from './InternationalProducerMap';
 import InternationalInsights from './InternationalInsights';
 import {INTERNATIONAL_SENSORY,splitDescriptorTags,toggleDescriptorTag} from './internationalSensory';
 import {createRequestGate} from './requestGate';
+import {volumeFromQuantity} from './internationalInput';
 
 const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
 interface Props {token:string;storage:StorageInfo|null;onConnect:()=>void}
@@ -61,6 +65,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [photo,setPhoto]=useState<File|null>(null);
  const [query,setQuery]=useState('');
  const [offQuery,setOffQuery]=useState('');
+ const [barcode,setBarcode]=useState('');
  const [wikiQuery,setWikiQuery]=useState('');
  const [wikiResults,setWikiResults]=useState<WikidataCandidate[]>([]);
  const [wikiState,setWikiState]=useState<'idle'|'loading'|'error'|'done'>('idle');
@@ -71,6 +76,10 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [error,setError]=useState('');
  const [ready,setReady]=useState(false);
  const [selected,setSelected]=useState<string>('');
+ const [editing,setEditing]=useState<InternationalRecord|null>(null);
+ const [trash,setTrash]=useState<TrashEntry[]>([]);
+ const [localTrash,setLocalTrash]=useState<InternationalRecord[]>([]);
+ const editAttempt=useRef<InternationalRecord|null>(null);
  const [pendingCloudSheet,setPendingCloudSheet]=useState('');
  const pendingCloudSave=useRef<{spreadsheetId:string;record:InternationalRecord;photo:File|null}|null>(null);
  const loadGate=useRef(createRequestGate());
@@ -83,23 +92,32 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const masterMatches=useMemo(()=>chinaMasterSearch(master.rows,kind,query,30),[master.rows,kind,query]);
  const own=useMemo(()=>records.filter(r=>filter==='all'||r.kind===filter),[records,filter]);
  const chosen=records.find(x=>x.id===selected);
- const load=async(isCurrent:()=>boolean=()=>true)=>{
-   setCloudLoading(Boolean(token&&storage));
-   try{
-     const local=await listInternationalRecords();
-     if(!isCurrent())return;
-     setLocalCount(local.length);
-     const actual=token&&storage?await loadChinaCloud(token,storage):local;
-     if(!isCurrent())return;
-     setRecords(actual);setReady(true);setError('');
-   }catch(e){if(isCurrent()){setReady(false);setError(e instanceof Error?e.message:'記録を読み込めません。');}}
-   finally{if(isCurrent())setCloudLoading(false);}
+ const load=async(isCurrent:()=>boolean):Promise<boolean>=>{
+  setCloudLoading(Boolean(token&&storage));
+  try{
+    const local=await listInternationalRecords();
+    if(!isCurrent())return false;
+    setLocalCount(local.length);
+    if(token&&storage){
+      const [actual,deleted]=await Promise.all([loadChinaCloud(token,storage),listTrash(token,storage)]);
+      if(!isCurrent())return false;
+      const hidden=new Set(deleted.filter(x=>x.kind==='china').map(x=>x.id));
+      setRecords(actual.filter(x=>!hidden.has(x.id)));
+      setTrash(deleted);setLocalTrash([]);
+    }else{
+      const deleted=await listTrashedInternationalRecords();
+      if(!isCurrent())return false;
+      setTrash([]);setLocalTrash(deleted);setRecords(local);
+    }
+    setReady(true);setError('');return true;
+  }catch(e){if(isCurrent()){setReady(false);setError(e instanceof Error?e.message:'記録を読み込めません。');}return false;}
+  finally{if(isCurrent())setCloudLoading(false);}
  };
  useEffect(()=>{
    let active=true;
    const current=loadGate.current.begin();
    const isCurrent=()=>active&&current();
-   setRecords([]);setReady(false);setSelected('');
+   setRecords([]);setTrash([]);setLocalTrash([]);setEditing(null);editAttempt.current=null;setReady(false);setSelected('');
    void load(isCurrent);
    return()=>{active=false;loadGate.current.invalidate();};
  },[token,storage?.spreadsheetId]);
@@ -123,7 +141,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
      .catch(()=>{if(active)setOsmStatus('unavailable');});
    return ()=>{active=false;};
  },[]);
- const swap=(next:BeverageKind)=>{setKind(next);setData(initial(next));setQuery('');setOffResults([]);setOffState('idle');setPhoto(null);setSelected('');setError('');};
+ const swap=(next:BeverageKind)=>{setEditing(null);editAttempt.current=null;setKind(next);setData(initial(next));setQuery('');setOffResults([]);setOffState('idle');setPhoto(null);setSelected('');setError('');};
  const setField=(key:string,value:string)=>setData(d=>({...d,[key]:value}));
  const setAttribute=(key:string,value:string)=>setData(d=>({...d,attributes:{...d.attributes,[key]:value}}));
  const toggleSense=(field:'aromaTags'|'tasteTags',tag:string)=>setData(d=>({...d,
@@ -170,8 +188,89 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
      setOffResults(normalizeOffProducts(json));setOffState('done');
    }catch(e){setOffState('error');setError('Open Food Factsの検索に失敗しました。中国国内などからアクセスできない場合は手動入力してください。');}
  };
+ const chooseOffProduct=(p:OffProduct)=>{
+   const ml=volumeFromQuantity(p.quantity);
+   setData(d=>({...d,brandName:p.brandName||d.brandName,productName:p.productName,sourceUrl:p.source,
+     attributes:{...d.attributes,...(ml?{volume:String(ml)}:{})}}));
+   setQuery(p.brandName||'');
+ };
+ const lookupBarcode=async(code:string)=>{
+   if(!/^\d{8,14}$/.test(code)){setError('JAN/EANバーコードは8〜14桁の数字を入力してください。');return;}
+   setOffState('loading');setError('');
+   try{
+     const u='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
+       '.json?fields=code,product_name,brands,quantity';
+     const response=await fetch(u,{signal:AbortSignal.timeout(15000)});
+     if(!response.ok)throw Error('検索失敗');
+     const obj=await response.json() as {product?:unknown};
+     const normalized=normalizeOffProducts({products:obj.product?[obj.product]:[]});
+     if(!normalized.length){setError('このバーコードに対応する商品が見つかりません。手動検索も可能です。');setOffState('done');return;}
+     setOffResults(normalized);chooseOffProduct(normalized[0]);setOffState('done');
+     setStatus('バーコードの照合結果を入力しました。商品・産地・容量はラベルで確認してください。');
+   }catch{setError('バーコード検索に接続できませんでした。手入力を利用してください。');setOffState('error');}
+ };
+ const scanBarcode=async(file:File)=>{
+   const Detector=(window as unknown as {BarcodeDetector?:new(options:{formats:string[]})=>{detect:(img:ImageBitmap)=>Promise<{rawValue:string}[]>}}).BarcodeDetector;
+   if(!Detector){setError('このブラウザはバーコードの画像認識に対応していません。番号を手入力してください。');return;}
+   try{
+     const bitmap=await createImageBitmap(file);
+     let codes:{rawValue:string}[]=[];
+     try{codes=await new Detector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}).detect(bitmap);}
+     finally{bitmap.close();}
+     if(!codes.length){setError('バーコードを読み取れませんでした。正面から撮影するか番号を入力してください。');return;}
+     const code=codes.map(x=>x.rawValue).find(x=>/^\d{8,14}$/.test(x));
+     if(!code){setError('対応するJAN/EANバーコードがありません。');return;}
+     setBarcode(code);await lookupBarcode(code);
+   }catch{setError('画像からバーコードを読み取れませんでした。番号を入力してください。');}
+ };
+ const beginEdit=(rec:InternationalRecord)=>{
+   if(busy||pendingCloudSave.current){setError('未完了の保存を先に再試行してください。');return;}
+   setEditing(rec);editAttempt.current=null;setKind(rec.kind);
+   setData({kind:rec.kind,brandName:rec.brandName,productName:rec.productName,
+     producer:rec.producer,region:rec.region,sourceUrl:rec.sourceUrl,
+     attributes:{...rec.attributes},experience:rec.experience,tastedAt:rec.tastedAt,
+     rating:rec.rating,aroma:rec.aroma,taste:rec.taste,
+     notes:rec.experience==='test'?rec.notes.replace(/^【UXTEST・本人未試飲】/,''):rec.notes});
+   setPhoto(null);setQuery(rec.brandName);setError('');setSection('new');
+   window.scrollTo({top:0,behavior:'smooth'});
+ };
+ const beginRetaste=(rec:InternationalRecord)=>{
+   if(busy||pendingCloudSave.current){setError('未完了の保存を先に完了してください。');return;}
+   setEditing(null);editAttempt.current=null;setKind(rec.kind);
+   setData({kind:rec.kind,brandName:rec.brandName,productName:rec.productName,
+     producer:rec.producer,region:rec.region,sourceUrl:rec.sourceUrl,
+     attributes:Object.fromEntries(Object.entries(rec.attributes).filter(([key])=>
+       key!=='aromaTags'&&key!=='tasteTags'&&!key.startsWith('axis'))),
+     experience:'tasted',tastedAt:today(),rating:'',aroma:'',taste:'',notes:''});
+   setPhoto(null);setQuery(rec.brandName);setSection('new');
+   window.scrollTo({top:0,behavior:'smooth'});
+ };
+ const moveRecord=async(rec:InternationalRecord)=>{
+   if(busy||!ready||!window.confirm('「'+rec.productName+'」をゴミ箱に移動しますか？元の記録と写真は保持され、復元できます。'))return;
+   const isCurrent=loadGate.current.begin();setBusy(true);setError('');
+   try{
+     if(token&&storage)await moveToTrash(token,storage,'china',rec.id);
+     else await trashLocalInternationalRecord(rec.id);
+     if(!isCurrent())return;
+     await load(isCurrent);if(!isCurrent())return;
+     setSelected('');setStatus('ゴミ箱に移動しました。');
+   }catch(e){if(isCurrent())setError(e instanceof Error?e.message:'ゴミ箱への移動に失敗しました。');}
+   finally{if(isCurrent())setBusy(false);}
+ };
+ const recoverRecord=async(id:string)=>{
+   if(busy||!ready)return;
+   const isCurrent=loadGate.current.begin();setBusy(true);setError('');
+   try{
+     if(token&&storage)await restoreFromTrash(token,storage,'china',id);
+     else await restoreLocalInternationalRecord(id);
+     if(!isCurrent())return;
+     await load(isCurrent);if(isCurrent())setStatus('ゴミ箱から復元しました。');
+   }catch(e){if(isCurrent())setError(e instanceof Error?e.message:'復元に失敗しました。');}
+   finally{if(isCurrent())setBusy(false);}
+ };
  const save=async(e:FormEvent)=>{
    e.preventDefault();if(busy||!ready)return;
+   const isCurrent=loadGate.current.begin();
    setBusy(true);setStatus('');setError('');
    let record:InternationalRecord={
      id:crypto.randomUUID(),kind,brandName:data.brandName.trim(),productName:data.productName.trim(),
@@ -184,47 +283,62 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
      createdAt:new Date().toISOString(),photo:null
    };
    let photoToSave=photo;
-   if(token&&storage){
+   if(editing){
+     const next={...record,id:editing.id,createdAt:editing.createdAt,photoId:editing.photoId,photo:editing.photo};
+     record=editAttempt.current||next;
+     if(!editAttempt.current)editAttempt.current=record;
+   }else if(token&&storage){
      const pending=pendingCloudSave.current;
-     if(pending&&pending.spreadsheetId===storage.spreadsheetId){
-       record=pending.record;photoToSave=pending.photo;
-     }else{
-       pendingCloudSave.current={spreadsheetId:storage.spreadsheetId,record,photo};
-       setPendingCloudSheet(storage.spreadsheetId);
-     }
+     if(pending&&pending.spreadsheetId===storage.spreadsheetId){record=pending.record;photoToSave=pending.photo;}
+     else{pendingCloudSave.current={spreadsheetId:storage.spreadsheetId,record,photo};
+          setPendingCloudSheet(storage.spreadsheetId);}
    }
    try{
-     if(token&&storage){
+     if(editing){
+       if(token&&storage)await updateChinaCloud(token,storage,editing,record,photoToSave);
+       else await replaceInternationalRecord(editing,record,photoToSave);
+     }else if(token&&storage){
        await saveChinaCloud(token,storage,record,photoToSave);
-       if(pendingCloudSave.current?.spreadsheetId===storage.spreadsheetId){pendingCloudSave.current=null;setPendingCloudSheet('');}
+       if(isCurrent()&&pendingCloudSave.current?.spreadsheetId===storage.spreadsheetId){
+         pendingCloudSave.current=null;setPendingCloudSheet('');
+       }
      }else await saveInternationalRecord(record,photo);
-     await load();setData(initial(kind));setPhoto(null);setQuery('');setOffResults([]);setOffState('idle');
-     setSection('collection');
-     setStatus(token&&storage?'Google Sheetsに保存し、読み戻して確認しました。':'端末内に保存しました。Google Driveには同期していません。');
-   }catch(x){setError(x instanceof Error?x.message:'保存できませんでした。');}
-   finally{setBusy(false);}
+     if(!isCurrent())return;
+     const loaded=await load(isCurrent);
+     if(!isCurrent())return;
+     if(!loaded){setStatus('保存後の読込に失敗しました。再読込して確認してください。');return;}
+     setData(initial(kind));setPhoto(null);setQuery('');setOffResults([]);
+     setOffState('idle');setEditing(null);editAttempt.current=null;setSection('collection');
+     setStatus(editing?'記録を編集しました。':token&&storage?'Google Sheetsへの保存を確認しました。':'端末内に保存しました。');
+   }catch(e){if(isCurrent())setError(e instanceof Error?e.message:'保存できませんでした。');}
+   finally{if(isCurrent())setBusy(false);}
  };
  const backup=async()=>{
-   setError('');setStatus('');
+   const isCurrent=loadGate.current.begin();setError('');setStatus('');
    try{
      const complete=await Promise.all(records.map(async r=>({...r,
        photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId,storage?.photoFolderId):null)})));
-     const blob=await buildBackup(complete),url=URL.createObjectURL(blob),a=document.createElement('a');
+     const blob=await buildBackup(complete);if(!isCurrent())return;
+     const url=URL.createObjectURL(blob),a=document.createElement('a');
      a.href=url;a.download='sakefolio-china-backup-'+today()+'.json';a.click();
      setTimeout(()=>URL.revokeObjectURL(url),60000);
      setStatus('バックアップのダウンロードを開始しました。端末外にも安全に保管してください。');
-   }catch(e){setError(e instanceof Error?e.message:'書き出しに失敗しました。');}
+   }catch(e){if(isCurrent())setError(e instanceof Error?e.message:'書き出しに失敗しました。');}
  };
  const restore=async(e:ChangeEvent<HTMLInputElement>)=>{
    const file=e.target.files?.[0];e.target.value='';if(!file)return;
+   if(token){setError('クラウド接続中は端末内バックアップを復元できません。接続解除後に操作してください。');return;}
+   const isCurrent=loadGate.current.begin();
    if(!window.confirm('バックアップを読み込みます。既存IDは上書きせず、重複を追加しません。続行しますか？'))return;
    setBusy(true);setError('');setStatus('');
    try{
-     const outcome=await restoreBackup(file);await load();
+     const outcome=await restoreBackup(file);
+     if(!isCurrent())return;
+     await load(isCurrent);if(!isCurrent())return;
      setStatus('端末内へ復元しました：新規'+outcome.added+'件、既存重複'+outcome.duplicates+'件。Google Driveへは自動移行しません。');
      setSection('collection');
-   }catch(x){await load();setError(x instanceof Error?x.message:'復元できませんでした。');}
-   finally{setBusy(false);}
+   }catch(x){if(isCurrent()){await load(isCurrent);if(isCurrent())setError(x instanceof Error?x.message:'復元できませんでした。');}}
+   finally{if(isCurrent())setBusy(false);}
  };
  return <section className="page-section international-page">
    <div className="interior-head"><span className="taste-eyebrow">SAKEFOLIO · CHINA / INTERNATIONAL LAB</span>
@@ -278,6 +392,16 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           onClick={()=>pick(b.name,b.region)}>
           <strong>{b.name}</strong><span>{b.latin} · {b.region}</span><ArrowRight size={16}/></button>)}</div>
         {!filtered.length&&<p>候補がありません。実在する商品名を調べて手動で登録できます。</p>}
+        <h3>バーコードで商品を探す</h3>
+        <p>JAN/EAN番号からOpen Food Factsを検索します。画像読み取り対応ブラウザでは写真からバーコードを検出できます。画像は端末内で解析し、番号だけを検索先へ送信します。</p>
+        <label>バーコード番号（8〜14桁）<input type="text" inputMode="numeric" pattern="[0-9]{8,14}" maxLength={14}
+          value={barcode} onChange={e=>setBarcode(e.target.value.replace(/[^0-9]/g,''))} placeholder="例：4901234567894"/></label>
+        <div className="record-actions">
+          <button type="button" onClick={()=>void lookupBarcode(barcode)} disabled={offState==='loading'}>番号で商品を検索</button>
+          <label className="record-scan-label">バーコード写真
+            <input type="file" accept="image/*" capture="environment" onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void scanBarcode(f);}}/>
+          </label>
+        </div>
         <h3>Open Food Factsから商品を検索</h3>
         <p>利用者が検索ボタンを押したときだけ外部APIへ検索語を送信します。商品名・ブランド名・容量はユーザー登録の参考値です。商品区分の一致やラベル写真の利用権限は別途確認してください。</p>
         <label>商品名・ブランド名<input value={offQuery} onChange={e=>setOffQuery(e.target.value)}
@@ -286,10 +410,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           {offState==='loading'?'検索中…':'Open Food Factsを検索'} <Search size={15}/></button>
         {offState==='done'&&!offResults.length&&<p role="status">一致する商品がありません。検索語を変えるか手動入力してください。</p>}
         {!!offResults.length&&<div className="international-hits">
-          {offResults.map(p=><button type="button" key={p.code} onClick={()=>{
-            setData(d=>({...d,brandName:p.brandName||d.brandName,productName:p.productName,sourceUrl:p.source}));
-            setQuery(p.brandName||'');
-          }}>
+          {offResults.map(p=><button type="button" key={p.code} onClick={()=>chooseOffProduct(p)}>
             <strong>{p.productName}</strong><span>{p.brandName||'ブランド未登録'} · {p.quantity} · EAN {p.code}</span><ArrowRight size={16}/></button>)}</div>}
         <p className="international-credits"><a href="https://world.openfoodfacts.org/" target="_blank" rel="noopener noreferrer">Open Food Facts</a> — ODbL / データ帰属。<a href="https://world.openfoodfacts.org/terms-of-use" target="_blank" rel="noopener noreferrer">再利用規約</a>。掲載データの正確性・網羅性は未保証。</p>
         <h3>Wikidataでブランド・メーカーを照合</h3>
@@ -309,8 +430,10 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
         <p className="international-credits"><a href="https://www.wikidata.org/" target="_blank" rel="noopener noreferrer">Wikidata</a> — CC0、各候補のQ-IDを出典として参照できます。検索は任意・明示的に実行します。</p>
       </div>
       <form className="international-form" onSubmit={save}>
-        <h2><BookOpen size={19}/> {config.name}の記録</h2>
-        <fieldset disabled={busy||!!pendingCloudSheet&&pendingCloudSheet===storage?.spreadsheetId} className="international-form-fields">
+        <h2><BookOpen size={19}/> {config.name}の{editing?'記録を編集':'記録'}</h2>
+        {editing&&<button className="text-action" type="button" onClick={()=>{setEditing(null);editAttempt.current=null;setData(initial(kind));setPhoto(null);setSection('collection');}}>編集をキャンセル</button>}
+        {editing&&editAttempt.current&&<p role="status">更新結果が不明な場合、同じ内容で再試行してください。内容を変える場合はいったん編集を取り消してください。</p>}
+        <fieldset disabled={busy||!!editAttempt.current||!!pendingCloudSheet&&pendingCloudSheet===storage?.spreadsheetId} className="international-form-fields">
         <div className="field-grid two">
           <label>ブランド名 <span className="required">必須</span><input required maxLength={200} value={data.brandName} onChange={e=>setField('brandName',e.target.value)} placeholder="商品に記載された銘柄名"/></label>
           <label>商品・シリーズ名 <span className="required">必須</span><input required maxLength={200} value={data.productName} onChange={e=>setField('productName',e.target.value)} placeholder="正式な商品名"/></label>
@@ -394,10 +517,11 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           <span>{photo?photo.name:'端末で撮影または保存した写真を選択（10MB以内）'}</span>
           <input type="file" accept="image/*" onChange={e=>setPhoto(e.target.files?.[0]||null)}/>
         </label>
+        {editing?.photoId&&!photo&&<p className="field-help">既存写真はそのまま残ります。新しい写真を選ぶと差し替えます。</p>}
         {photo&&<button type="button" className="international-photo-clear" onClick={()=>setPhoto(null)}>写真を取り消す <X size={14}/></button>}
         </fieldset>
         <button type="submit" disabled={!ready||busy} className="button button-dark international-save">
-          {busy?'保存中…':token&&storage?'Google Driveに保存する':'この端末に保存する'} <ArrowRight size={17}/></button>
+          {busy?'保存中…':editing?'編集内容を保存する':token&&storage?'Google Driveに保存する':'この端末に保存する'} <ArrowRight size={17}/></button>
         <p className="international-small">日本酒の表とは別の「ChinaDrinks」に保存します。端末内からGoogleへの自動同期は行いません。保存が未確認の場合は同じ内容で再試行できます。</p>
       </form>
     </div>
@@ -423,10 +547,21 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
          <p>登録 {records.length}件 · 実飲 {records.filter(r=>r.experience==='tasted').length}件 ·
            UXTEST {records.filter(r=>r.experience==='test').length}件 · 実飲平均評価 {avg(records)}点</p></div>
        <div className="international-backup-actions">
-         <button type="button" onClick={()=>void backup()} disabled={!ready||!records.length}><Download size={16}/> バックアップ書出し</button>
-         <label><Upload size={16}/> バックアップを復元<input type="file" accept=".json,application/json" onChange={e=>void restore(e)} disabled={busy}/></label>
+         <button type="button" onClick={()=>void backup()} disabled={!ready||!records.length}><Download size={16}/> 写真付きJSONバックアップ</button>
+         <button type="button" disabled={!records.length}
+           onClick={()=>downloadCsv('sakefolio-china.csv',records.map(({photo,...fields})=>fields))}>CSV書出し</button>
+         <label><Upload size={16}/> バックアップを復元<input type="file" accept=".json,application/json" onChange={e=>void restore(e)} disabled={busy||!!token}/></label>
        </div>
      </div>
+     {!!(token&&storage?trash.filter(t=>t.kind==='china').length:localTrash.length)&&
+       <div className="trash-panel"><h3>中国酒のゴミ箱</h3>
+         <p>記録と写真は保持しています。復元することができます。</p>
+         {(token&&storage?trash.filter(t=>t.kind==='china'):localTrash.map(rec=>({kind:'china' as const,id:rec.id,deletedAt:rec.trashedAt||''})))
+           .map(t=><div className="record-actions" key={t.id}>
+             <span>{localTrash.find(x=>x.id===t.id)?.productName||t.id}（{t.deletedAt.slice(0,10)}）</span>
+             <button type="button" disabled={busy} onClick={()=>void recoverRecord(t.id)}>復元</button>
+           </div>)}
+       </div>}
      <div className="international-collection-filter" role="group" aria-label="コレクションの酒類を絞る">
        {[{id:'all',name:'すべて'},...KIND_CONFIG].map(k=><button type="button" key={k.id} aria-pressed={filter===k.id} onClick={()=>{setFilter(k.id as BeverageKind|'all');setSelected('');}}>{k.name}</button>)}
      </div>
@@ -443,6 +578,11 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
          <ArrowRight size={17}/></button>)}</div>
        {chosen&&<article className="international-record-detail">
          <button className="international-close" type="button" onClick={()=>setSelected('')}><X size={17}/> 閉じる</button>
+         <div className="record-actions">
+           <button type="button" disabled={busy} onClick={()=>beginEdit(chosen)}>編集</button>
+           <button type="button" disabled={busy} onClick={()=>beginRetaste(chosen)}>もう一度飲む</button>
+           <button type="button" disabled={busy} onClick={()=>void moveRecord(chosen)}>ゴミ箱へ</button>
+         </div>
          <div className="international-detail-photo"><PhotoPreview blob={chosen.photo} photoId={chosen.photoId} token={token} folderId={storage?.photoFolderId} alt={chosen.productName+'のラベル'}/></div>
          <h3>{chosen.productName}</h3><p>{chosen.brandName} · {KIND_NAME(chosen.kind)} · {chosen.region}</p>
          {INTERNATIONAL_SENSORY[chosen.kind]&&
@@ -472,6 +612,12 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
            ] as string[][]).filter(([,v])=>v).map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
          </dl>
          {chosen.notes&&<p className="international-notes">{chosen.notes}</p>}
+         {sameProductHistory(records,chosen).length>0&&<div className="preference-card">
+           <strong>同じ商品の記録との比較</strong>
+           {sameProductHistory(records,chosen).slice(0,8).map(x=><p key={x.id}>
+             {x.tastedAt||'日付なし'} — {x.rating||'未評価'}点 — {x.notes.slice(0,70)}
+           </p>)}
+         </div>}
          {chosen.sourceUrl&&<a className="international-source-link" href={chosen.sourceUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={15}/> 商品情報の出典を確認</a>}
          {chosen.producer&&<a className="international-source-link" target="_blank" rel="noopener noreferrer"
            href={'https://www.openstreetmap.org/search?query='+encodeURIComponent(chosen.producer+' '+chosen.region+' 中国')}><MapPin size={15}/> OpenStreetMapで場所を検索（位置未確定）</a>}

@@ -12,13 +12,18 @@ import type { BreweryCoordinate } from './breweryMapModel';
 import BreweryMap from './BreweryMap';
 import TasteDashboard from './TasteDashboard';
 import InternationalDrinks from './InternationalDrinks';
+import Legal from './Legal';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
 import { AROMA_GROUPS, POPULAR_AROMA_IDS, SENSORY_AXES, TASTE_GROUPS, selectedIds, tagLabels, toggleIds } from './sensory';
-import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
+import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage, updateReview } from './google';
+import {listTrash,moveToTrash,restoreFromTrash} from './trash';
+import type {TrashEntry} from './trash';
+import {downloadCsv,downloadJson,downloadBlob,buildPreferenceSummary} from './recordArchive';
+import {buildJapanBackup,readJapanBackup} from './japanBackup';
 
-type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights' | 'international';
+type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights' | 'international' | 'legal';
 function todayLocal(): string {
   const date = new Date();
   return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
@@ -61,6 +66,10 @@ export default function App() {
   const [coordinateStatus, setCoordinateStatus] = useState<'loading'|'loaded'|'error'>('loading');
   const [manualBrands, setManualBrands] = useState<Brand[]>([]);
   const [records, setRecords] = useState<RecordEntry[]>([]);
+  const [trash, setTrash] = useState<TrashEntry[]>([]);
+  const [editingRecord, setEditingRecord] = useState<RecordEntry|null>(null);
+  const editingAttempt=useRef<SaveAttempt|null>(null);
+  const visibleRecords=useMemo(()=>records.filter(x=>!trash.some(t=>t.kind==='japan'&&t.id===x.reviewId)),[records,trash]);
   const [token, setToken] = useState('');
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [accountEmail, setAccountEmail] = useState('');
@@ -84,7 +93,7 @@ export default function App() {
   const session = useRef(0);
   const operation = useRef(false);
   const brands = useMemo(() => [...manualBrands, ...catalog], [manualBrands, catalog]);
-  const breweries=useMemo(()=>listBreweries(brands,records),[brands,records]);
+  const breweries=useMemo(()=>listBreweries(brands,visibleRecords),[brands,visibleRecords]);
   const breweryMatches=useMemo(()=>{
     const q=entry.breweryName.trim().toLocaleLowerCase('ja');
     if(!q)return [];
@@ -124,7 +133,8 @@ export default function App() {
     operation.current = true;
     const current = ++session.current;
     const previousEmail = accountEmail;
-    setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
+    setEditingRecord(null);
+    setToken('');setStorage(null);setRecords([]);setTrash([]);setManualBrands([]);setAccountEmail('');
     setBusy(true); setMessage('');
     try {
       const accessToken = await requestGoogleAccess();
@@ -134,11 +144,11 @@ export default function App() {
       }
       if (previousEmail && previousEmail !== account.emailAddress) {setEntry(emptyEntry());setSelectedPhoto(null);}
       const myStorage = await ensureStorage(accessToken);
-      const [saved, added] = await Promise.all([
-        loadRecords(accessToken, myStorage),loadManualBrands(accessToken,myStorage)
+      const [saved, added, deleted] = await Promise.all([
+        loadRecords(accessToken, myStorage),loadManualBrands(accessToken,myStorage),listTrash(accessToken,myStorage)
       ]);
       if (session.current !== current) return;
-      setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);
+      setToken(accessToken);setStorage(myStorage);setRecords(saved);setTrash(deleted);setManualBrands(added);
       setAccountEmail(account.emailAddress);
       setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
     } catch (error) {
@@ -148,10 +158,10 @@ export default function App() {
   };
   const disconnect = () => {
     if (operation.current) return;
-    pendingSave.current = null;setSelectedPhoto(null);
+    pendingSave.current = null;setSelectedPhoto(null);setEditingRecord(null);editingAttempt.current=null;
     const current=++session.current;
     const revocation=token?revokeAccess(token):Promise.resolve({successful:true});
-    setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
+    setToken('');setStorage(null);setRecords([]);setTrash([]);setManualBrands([]);setAccountEmail('');
     setPhoto(null);setEntry(emptyEntry());
     setMessage(token?'Sakefolioの接続を解除しました。Google側の権限解除を確認しています。':'Sakefolioの接続を解除しました。');
     setMenuOpen(false);
@@ -197,25 +207,99 @@ export default function App() {
     }
     if (photoBusy || photoError) {setMessage('写真の確認が終わるまで保存できません。写真を選び直すか取り消してください。');return;}
     try {validateRecordInput(entry);} catch(error) {setMessage(error instanceof Error?error.message:'入力内容を確認してください。');return;}
-    const pending = pendingSave.current ||= {entry:{...entry},photo,attempt:{reviewId:crypto.randomUUID()},email:accountEmail};
+    const pending = editingRecord?null:(pendingSave.current ||= {entry:{...entry},photo,attempt:{reviewId:crypto.randomUUID()},email:accountEmail});
     operation.current = true;
     const current = session.current;
     setBusy(true);setMessage('');
     try {
-      const reviewId = await saveRecord(token,storage,pending.entry,brands,pending.photo,pending.attempt);
+      const reviewId = editingRecord
+        ? (await updateReview(token,storage,editingRecord,entry,photo,
+             editingAttempt.current ||= {reviewId:editingRecord.reviewId})).reviewId
+        : await saveRecord(token,storage,pending!.entry,brands,pending!.photo,pending!.attempt);
       if (session.current !== current) return;
       const [saved, added] = await Promise.all([loadRecords(token,storage),loadManualBrands(token,storage)]);
       if (session.current !== current) return;
       if (!saved.some(record=>record.reviewId===reviewId)) throw new Error('保存後の一覧に記録が見つかりません。同じ画面から再確認してください。');
-      pendingSave.current = null;
+      pendingSave.current = null;setEditingRecord(null);editingAttempt.current=null;
       setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);setSelectedPhoto(null);
       setShowAdvanced(false);setShowAllAromas(false);setAromaSearch('');setTab('home');
-      setMessage('記録を保存しました。Google SheetsとDriveで確認できます。');
+      setMessage(editingRecord?'既存の記録を更新しました。':'記録を保存しました。Google SheetsとDriveで確認できます。');
       window.scrollTo({top:0,behavior:'smooth'});
     } catch (error) {
       if (session.current !== current) return;
       setMessage((error instanceof Error ? error.message : '記録の保存に失敗しました。')+' 入力内容を保持しています。認証期限切れの場合は右上から再接続し、同じ保存ボタンを押してください。');
     } finally {operation.current = false;setBusy(false);}
+  };
+  const reloadCollection=async(current:number)=>{
+    if(!token||!storage)return;
+    const [saved,deleted]=await Promise.all([loadRecords(token,storage),listTrash(token,storage)]);
+    if(session.current===current){setRecords(saved);setTrash(deleted);}
+  };
+  const exportJapanesePhotos=async()=>{
+    if(!token||!storage||operation.current)return;
+    operation.current=true;setBusy(true);const current=session.current;
+    try{
+      const blob=await buildJapanBackup(visibleRecords,id=>getPhotoBlob(token,id,storage.photoFolderId));
+      if(current!==session.current)return;
+      downloadBlob('sakefolio-japan-with-photos-'+todayLocal()+'.json',blob);
+      setMessage('写真付き日本酒バックアップを書き出しました。個人情報を含むため安全に保管してください。');
+    }catch(e){if(current===session.current)setMessage(e instanceof Error?e.message:'バックアップを書き出せませんでした。');}
+    finally{operation.current=false;setBusy(false);}
+  };
+  const importJapanesePhotos=async(file:File)=>{
+    if(!token||!storage||operation.current)return;
+    operation.current=true;setBusy(true);const current=session.current;
+    try{
+      const items=await readJapanBackup(file);
+      if(current!==session.current)return;
+      if(!window.confirm(items.length+'件の日本酒記録と写真をGoogle Driveに復元します。既に復元したIDはスキップしますが、初回は新たな記録になります。続行しますか？'))return;
+      const existing=await loadRecords(token,storage);
+      const ids=new Set(existing.map(r=>r.reviewId));
+      let added=0,skipped=0;
+      for(const item of items){
+        if(current!==session.current)return;
+        const id='restored-'+item.record.reviewId;
+        if(ids.has(id)){skipped++;continue;}
+        const source={...item.record,reviewId:'',brandId:'',photoId:'',createdAt:''};
+        const safe=item.photo?await createPhotoPreview(item.photo):null;
+        await saveRecord(token,storage,source,brands,
+          safe?new File([safe],'restored-label.png',{type:'image/png'}):null,
+          {reviewId:id,startedAt:item.record.createdAt});
+        ids.add(id);added++;
+      }
+      await reloadCollection(current);
+      if(current===session.current)setMessage('復元完了：'+added+'件追加、'+skipped+'件スキップ。記録と写真を確認してください。');
+    }catch(e){if(current===session.current)setMessage((e instanceof Error?e.message:'復元できませんでした。')+' 途中まで保存された場合は同じファイルを再選択してください。');}
+    finally{operation.current=false;setBusy(false);}
+  };
+  const beginEdit=(r:RecordEntry)=>{
+    if(pendingSave.current){setMessage('未完了の保存を先に再確認してください。');return;}
+    setEditingRecord(r);editingAttempt.current=null;setEntry({...emptyEntry(),...r});setSelectedPhoto(null);setPhoto(null);
+    setShowAdvanced(true);goto('record');
+  };
+  const beginRetaste=(r:RecordEntry)=>{
+    if(pendingSave.current){setMessage('未完了の保存を先に再確認してください。');return;}
+    const next={...emptyEntry(),brandId:r.brandId,brandName:r.brandName,breweryName:r.breweryName,
+      prefecture:r.prefecture,municipality:r.municipality,breweryAddress:r.breweryAddress,
+      productName:r.productName,sakeType:r.sakeType,sakeTypeOther:r.sakeTypeOther,
+      heatTreatment:r.heatTreatment,brewingMethod:r.brewingMethod,processingStyles:r.processingStyles,
+      riceVariety:r.riceVariety,polishingRatio:r.polishingRatio,alcoholPercent:r.alcoholPercent,vintage:r.vintage};
+    setEditingRecord(null);editingAttempt.current=null;setEntry(next);setSelectedPhoto(null);setPhoto(null);goto('record');
+  };
+  const moveReview=async(r:RecordEntry)=>{
+    if(!token||!storage||busy)return;
+    if(!window.confirm('「'+r.brandName+'」をゴミ箱に移動しますか？ゴミ箱から復元できます（元データ・写真は削除されません）。'))return;
+    setBusy(true);const current=session.current;
+    try{await moveToTrash(token,storage,'japan',r.reviewId);await reloadCollection(current);if(current===session.current)setMessage('ゴミ箱へ移動しました。下のゴミ箱から復元できます。');}
+    catch(e){if(current===session.current)setMessage(e instanceof Error?e.message:'削除操作に失敗しました。');}
+    finally{setBusy(false);}
+  };
+  const restoreReview=async(id:string)=>{
+    if(!token||!storage||busy)return;
+    setBusy(true);const current=session.current;
+    try{await restoreFromTrash(token,storage,'japan',id);await reloadCollection(current);if(current===session.current)setMessage('記録を復元しました。');}
+    catch(e){if(current===session.current)setMessage(e instanceof Error?e.message:'復元に失敗しました。');}
+    finally{setBusy(false);}
   };
   const filteredBrands = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('ja');
@@ -224,11 +308,11 @@ export default function App() {
       (!q || [b.brandName,b.breweryName,b.prefecture].some(v => v.toLocaleLowerCase('ja').includes(q)))
     ).slice(0,48);
   },[brands,search,filterPrefecture]);
-  const prefCount = useMemo(() => new Set(records.map(r => r.prefecture).filter(Boolean)).size,[records]);
+  const prefCount = useMemo(() => new Set(visibleRecords.map(r => r.prefecture).filter(Boolean)).size,[visibleRecords]);
   const avgRating = useMemo(() => {
-    const nums = records.map(r => Number(r.rating)).filter(r=>Number.isFinite(r)&&r>0);
+    const nums = visibleRecords.map(r => Number(r.rating)).filter(r=>Number.isFinite(r)&&r>0);
     return nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(1) : '—';
-  },[records]);
+  },[visibleRecords]);
 
 
   const navigation: {tab:Tab; title:string; icon:typeof BookOpen}[] = [
@@ -316,13 +400,21 @@ export default function App() {
             <button type="button" className="text-action" onClick={()=>goto('record')}>新しく記録 <Plus size={18}/></button>
           </div>
           <div className="stats-grid">
-            <div className="stat-box"><div className="stat-icon"><BookOpen size={20}/></div><strong>{records.length}</strong><span>飲んだ記録</span></div>
-            <div className="stat-box"><div className="stat-icon"><Wine size={20}/></div><strong>{new Set(records.map(r=>r.brandName)).size}</strong><span>出会った銘柄</span></div>
+            <div className="stat-box"><div className="stat-icon"><BookOpen size={20}/></div><strong>{visibleRecords.length}</strong><span>飲んだ記録</span></div>
+            <div className="stat-box"><div className="stat-icon"><Wine size={20}/></div><strong>{new Set(visibleRecords.map(r=>r.brandName)).size}</strong><span>出会った銘柄</span></div>
             <div className="stat-box"><div className="stat-icon"><MapPin size={20}/></div><strong>{prefCount}</strong><span>出会った産地</span></div>
             <div className="stat-box"><div className="stat-icon"><Star size={20}/></div><strong>{avgRating}</strong><span>平均評価</span></div>
           </div>
+          {token&&<div className="record-actions">
+            <button type="button" onClick={()=>downloadCsv('sakefolio-japan.csv',visibleRecords)}>日本酒CSVを書出す</button>
+            <button type="button" onClick={()=>downloadJson('sakefolio-japan-text-only.json',{format:'sakefolio-japan-text-v1',records:visibleRecords})}>JSON（写真IDのみ）</button>
+            <button type="button" disabled={busy} onClick={()=>void exportJapanesePhotos()}>写真付き日本酒バックアップ</button>
+            <label className="record-scan-label">日本酒バックアップの復元
+              <input type="file" accept=".json,application/json" disabled={busy} onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void importJapanesePhotos(f);}}/>
+            </label>
+          </div>}
           <div className="subheading-row"><h3>最近の記録</h3><span>{records.length ? 'NEWEST FIRST' : 'YOUR COLLECTION STARTS HERE'}</span></div>
-          {records.length ? <div className="records-grid">{records.map(r => <article className="record-card" key={r.reviewId}>
+          {visibleRecords.length ? <div className="records-grid">{visibleRecords.map(r => <article className="record-card" key={r.reviewId}>
             <div className="record-media">
               {r.photoId ? <Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル'}/> : <div className="photo-fallback"><Wine size={38} strokeWidth={1.2}/></div>}
               {r.rating && <div className="rating-pill"><Star size={12} fill="currentColor"/> {r.rating}</div>}
@@ -337,6 +429,11 @@ export default function App() {
               </div>}
               <div className="record-place"><MapPin size={13}/>{[r.prefecture,r.municipality].filter(Boolean).join(' · ') || '産地未登録'}</div>
               <p className="record-notes">{r.notes}</p>
+              <div className="record-actions">
+                <button type="button" onClick={()=>beginEdit(r)} disabled={busy}>編集</button>
+                <button type="button" onClick={()=>beginRetaste(r)} disabled={busy}>もう一度飲む</button>
+                <button type="button" onClick={()=>void moveReview(r)} disabled={busy}>ゴミ箱へ</button>
+              </div>
               <a className="record-map-link" target="_blank" rel="noopener noreferrer"
                 href={breweryMapsUrl(r.breweryName,r.prefecture,r.municipality,r.breweryAddress)}>
                 酒蔵をGoogleマップで探す <ExternalLink size={13}/></a>
@@ -348,6 +445,11 @@ export default function App() {
               <LogIn size={17}/>Google Driveに接続</button>
               : <button className="button button-dark" type="button" onClick={()=>goto('record')}>記録をはじめる <ArrowRight size={18}/></button>}
           </div>}
+          {!!trash.filter(x=>x.kind==='japan').length&&<section className="trash-panel" aria-label="日本酒のゴミ箱">
+            <h3>ゴミ箱（日本酒）</h3><p>ここにある記録は表示から隠しただけで、Google Sheetsと写真は保持しています。</p>
+            {trash.filter(x=>x.kind==='japan').map(x=><div key={x.id} className="record-actions"><span>{records.find(r=>r.reviewId===x.id)?.brandName||x.id}（{x.deletedAt.slice(0,10)}）</span><button type="button" onClick={()=>void restoreReview(x.id)} disabled={busy}>復元</button></div>)}
+          </section>}
+          {visibleRecords.length>1&&<div className="preference-card"><h3>私の好み</h3><p>{buildPreferenceSummary(visibleRecords)}</p></div>}
         </section>
         <section className="story-strip">
           <div><SectionEyebrow>FROM BOTTLE TO PLACE</SectionEyebrow><h2>味わいの向こうに、<br/>つくり手の土地がある。</h2>
@@ -382,11 +484,13 @@ export default function App() {
 
       {tab==='record' && <section className="page-section interior-section form-layout">
         <div className="interior-head"><SectionEyebrow>YOUR SAKE JOURNAL</SectionEyebrow>
-          <h1>日本酒を記録する<span className="green-period">.</span></h1>
+          <h1>{editingRecord?'日本酒の記録を編集する':'日本酒を記録する'}<span className="green-period">.</span></h1>
+          {editingRecord&&editingAttempt.current&&<p role="status">保存結果が不明な場合、同じ内容で再試行してください。修正が必要なら編集をキャンセルして再度開いてください。</p>}
+          {editingRecord&&<button className="text-action" type="button" onClick={()=>{setEditingRecord(null);editingAttempt.current=null;setEntry(emptyEntry());setSelectedPhoto(null);goto('home');}}>編集をキャンセル</button>}
           <p>酒蔵・銘柄・商品・味わいをそれぞれ分けて保存します。分からない項目は空白のままで構いません。</p>
         </div>
         <form onSubmit={save} className="record-form">
-          <fieldset disabled={busy || !!pendingSave.current} className="record-fields">
+          <fieldset disabled={busy || !!pendingSave.current || !!editingAttempt.current} className="record-fields">
           <div className="form-block">
             <div className="form-step"><span>01</span><div><h2>どこのお酒？</h2><p>酒蔵と銘柄、産地を記録しましょう。</p></div></div>
             <div className="form-fields">
@@ -481,6 +585,7 @@ export default function App() {
                 <input type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0]||null;setPhotoBusy(!!file);setPhoto(null);setPhotoError('');setSelectedPhoto(file);}}
                   aria-label="日本酒ラベル写真を選ぶ"/>
               </label>
+              {editingRecord?.photoId&&!selectedPhoto&&<p className="field-help">既存写真は保持します。写真を選ぶと差し替えます（古い写真は復元用にDriveへ残ります）。</p>}
               {selectedPhoto && <button className="remove-photo" type="button" onClick={()=>setSelectedPhoto(null)}>写真を取り消す <X size={15}/></button>}
               {photoBusy && <p role="status">写真を確認・変換しています…</p>}
               {photoError && <p role="alert">{photoError}</p>}
@@ -594,15 +699,16 @@ export default function App() {
             <div className="save-security"><ShieldCheck size={19}/>
               <span>{token ? accountEmail+' のGoogle Drive / Sheetsに保存します。' : 'Google接続後に、ご本人のDriveへ保存します。'}</span></div>
             {token ? <button disabled={busy||photoBusy||!!photoError} type="submit" className="button button-dark button-save">
-              {busy?'保存・再取得を確認しています…':pendingSave.current?'同じ記録の保存を再確認・再開':'この一杯を記録する'} <ArrowRight size={19}/></button>
+              {busy?'保存・再取得を確認しています…':editingRecord?'編集を保存する':pendingSave.current?'同じ記録の保存を再確認・再開':'この一杯を記録する'} <ArrowRight size={19}/></button>
               : <button disabled={busy||!GOOGLE_CLIENT_ID} type="button" onClick={connect} className="button button-dark button-save">
                 <LogIn size={18}/> Googleに接続してから保存</button>}
           </div>
         </form>
       </section>}
 
+      {tab==='legal' && <Legal/>}
       {tab==='international' && <InternationalDrinks key={storage?.spreadsheetId||'local'} token={token} storage={storage} onConnect={connect}/>}
-      {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
+      {tab==='insights' && <TasteDashboard records={visibleRecords} loggedIn={!!token}
         renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}
       {tab==='places' && <section className="page-section interior-section">
@@ -612,7 +718,7 @@ export default function App() {
         </div>
         {coordinateStatus==='loading'&&<p className="sake-atlas__loading" role="status">酒蔵の位置情報を読み込んでいます。</p>}
         {coordinateStatus==='error'&&<p className="sake-atlas__warning" role="alert">酒蔵の位置データを読み込めませんでした。酒蔵名からのGoogleマップ検索は利用できます。</p>}
-        <BreweryMap records={records} locations={breweryCoordinates}
+        <BreweryMap records={visibleRecords} locations={breweryCoordinates}
           renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
           onRecordBrewery={g=>{
             selectBrewery({name:g.breweryName,prefecture:g.prefecture,
@@ -627,6 +733,7 @@ export default function App() {
       <div className="footer-inner">
         <div className="footer-brand"><span className="logo-text">Sakefolio<span className="logo-dot">.</span></span><p>一杯を、忘れない。</p></div>
         <div className="footer-right"><span><ShieldCheck size={15}/> 日本酒はGoogle Drive、中国酒は端末内保存</span>
+          <button type="button" className="text-action" onClick={()=>goto('legal')}>プライバシー・利用案内</button>
           <a href="https://sakenowa.com" target="_blank" rel="noopener noreferrer">銘柄データ提供：さけのわ <ExternalLink size={12}/></a></div>
       </div>
     </footer>

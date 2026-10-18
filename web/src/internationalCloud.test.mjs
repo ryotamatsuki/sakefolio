@@ -21,7 +21,7 @@ const cloudUrl=compile(cloudSource,[
   ["from './photos.ts'",`from '${photosUrl}'`],
   ["from './internationalLocal.ts'",`from '${localUrl}'`]
 ]);
-const {CHINA_HEADERS,saveChinaCloud}=await import(cloudUrl);
+const {CHINA_HEADERS,saveChinaCloud,updateChinaCloud,serializeChinaRow}=await import(cloudUrl);
 const real={fetch:globalThis.fetch,createImageBitmap:globalThis.createImageBitmap,document:globalThis.document};
 test.afterEach(()=>Object.assign(globalThis,real));
 
@@ -87,4 +87,23 @@ for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks retry after 
   assert.equal(rows[1][16],'reserved-photo-id');
   assert.equal(uploads,1);
   assert.equal(appends,writeBeforeLostResponse?1:2);
+});
+
+test('China record editing updates exactly one matching row and rejects stale writes',async()=>{
+ const before=makeRecord(),revised={...before,notes:'修正済み'};
+ const row=serializeChinaRow(before),table=[[...CHINA_HEADERS],[...row]];
+ let updates=0;
+ globalThis.fetch=async(input,init={})=>{
+  const url=new URL(input);
+  if(url.hostname!=='sheets.googleapis.com')throw Error('Only Sheets values should be touched without a photo');
+  if(init.method==='PUT'){
+   assert.match(decodeURIComponent(url.pathname),/ChinaDrinks.*A2:Q2/);
+   table[1]=JSON.parse(init.body).values[0];updates++;return new Response(JSON.stringify({updatedCells:17}));
+  }
+  return new Response(JSON.stringify({values:table}),{headers:{'Content-Type':'application/json'}});
+ };
+ await updateChinaCloud('fake-token',storage,before,revised,null);
+ assert.equal(table[1][14],'修正済み');assert.equal(updates,1);
+ await assert.rejects(updateChinaCloud('fake-token',storage,before,{...before,notes:'old conflicting'},null),/他の端末/);
+ assert.equal(updates,1);
 });

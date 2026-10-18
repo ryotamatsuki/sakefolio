@@ -149,3 +149,62 @@ export async function saveChinaCloud(token:string,storage:StorageInfo,record:Int
      throw Error('保存結果を確認できません。再試行前にGoogle Sheetsを確認してください。');
  }finally{saving.delete(key);}
 }
+
+/** Edit only the record with matching id and original row bytes.
+ * Keep the prior photo private as rollback material; retention is documented in UI.
+ */
+export async function updateChinaCloud(token:string,storage:StorageInfo,
+ before:InternationalRecord,next:InternationalRecord,photoFile:File|null):Promise<void>{
+ if(before.id!==next.id||before.createdAt!==next.createdAt||before.kind!==next.kind)
+   throw Error('編集対象が異なります。');
+ validateInternationalRecord(next);
+ const key=storage.spreadsheetId+':'+before.id;
+ if(saving.has(key))throw Error('同じ記録を処理中です。');
+ saving.add(key);
+ try{
+   const sheet=await values(token,storage.spreadsheetId);
+   if(CHINA_HEADERS.some((x,i)=>sheet[0]?.[i]!==x))throw Error('ChinaDrinksの列構造が変わりました。');
+   const matches=sheet.map((row,index)=>({row,index})).filter(x=>x.index>0&&x.row[0]===before.id);
+   if(matches.length!==1)throw Error('編集対象の記録が見つからないか重複しています。');
+   const current=matches[0].row;
+   const oldRow=serializeChinaRow(before);
+   const proposed=serializeChinaRow(next);
+   // A lost response after an update is handled as an idempotent success.
+   if(proposed.every((v,i)=>v===String(current[i]||'')))return;
+   if(!oldRow.every((v,i)=>v===String(current[i]||'')))
+     throw Error('他の端末から記録が更新されています。再読み込みしてください。');
+   if(photoFile){
+     // The mutable next.photoId survives retries of this same edit attempt.
+     if(!next.photoId||next.photoId===before.photoId){
+       const response=await fetch('https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files',
+        {signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}});
+       if(!response.ok)throw Error('写真IDを予約できません。');
+       const result=await response.json() as {ids?:string[]};
+       if(!result.ids?.[0])throw Error('写真IDの予約結果がありません。');
+       next.photoId=result.ids[0];
+     }
+     const metadata=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(next.photoId)+'?fields=id,parents,appProperties',
+      {signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}});
+     if(metadata.status===404){
+       const safe=await sanitizePhotoForStorage(photoFile);
+       await uploadPhoto(token,storage.photoFolderId,safe,next.photoId,next.id);
+     }else{
+       if(!metadata.ok)throw Error('写真確認に失敗しました。');
+       const found=await metadata.json() as {parents?:string[];appProperties?:Record<string,string>};
+       if(!found.parents?.includes(storage.photoFolderId)||
+          found.appProperties?.sakefolioApp!=='sakefolio-react-v1'||
+          found.appProperties?.sakefolioKind!=='photo'||found.appProperties?.reviewId!==next.id)
+          throw Error('写真の所有情報が一致しません。');
+     }
+     await getPhotoBlob(token,next.photoId,storage.photoFolderId);
+   }
+   const row=serializeChinaRow(next);
+   const n=matches[0].index+1;
+   await sheetApi(token,endpoint(storage.spreadsheetId)+'/values/'+encodeURIComponent(location+'A'+n+':Q'+n)+'?valueInputOption=RAW',
+    {method:'PUT',body:JSON.stringify({values:[row]})});
+   const result=await values(token,storage.spreadsheetId);
+   const verify=result.slice(1).filter(x=>x[0]===before.id);
+   if(verify.length!==1||!row.every((v,i)=>v===String(verify[0][i]||'')))
+     throw Error('編集結果を確認できません。再読み込みしてください。');
+ }finally{saving.delete(key);}
+}
