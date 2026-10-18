@@ -23,14 +23,14 @@ const initial=(kind:BeverageKind)=>({
   kind,brandName:'',productName:'',producer:'',region:'',sourceUrl:'',attributes:{} as Record<string,string>,
   experience:'catalogued' as 'catalogued'|'tasted'|'test',tastedAt:'',rating:'',aroma:'',taste:'',notes:''
 });
-function PhotoPreview({blob,photoId,token,alt}:{blob:Blob|null;photoId?:string;token:string;alt:string}){
+function PhotoPreview({blob,photoId,token,folderId,alt}:{blob:Blob|null;photoId?:string;token:string;folderId?:string;alt:string}){
  const [url,setUrl]=useState(''),[error,setError]=useState(false);
  useEffect(()=>{
   let alive=true,current='';
   setUrl('');setError(false);
   const task=async()=>{
    try{
-    const data=blob||(photoId&&token?await getPhotoBlob(token,photoId):null);
+    const data=blob||(photoId&&token?await getPhotoBlob(token,photoId,folderId):null);
     if(!data)return;
     current=URL.createObjectURL(data);
     if(alive)setUrl(current);else URL.revokeObjectURL(current);
@@ -38,7 +38,7 @@ function PhotoPreview({blob,photoId,token,alt}:{blob:Blob|null;photoId?:string;t
   };
   void task();
   return()=>{alive=false;if(current)URL.revokeObjectURL(current);};
- },[blob,photoId,token]);
+ },[blob,photoId,token,folderId]);
  return url?<img src={url} alt={alt} loading="lazy"/>:
    error?<span role="alert">写真を取得できません</span>:<Wine size={25}/>;
 }
@@ -208,7 +208,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
    setError('');setStatus('');
    try{
      const complete=await Promise.all(records.map(async r=>({...r,
-       photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId):null)})));
+       photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId,storage?.photoFolderId):null)})));
      const blob=await buildBackup(complete),url=URL.createObjectURL(blob),a=document.createElement('a');
      a.href=url;a.download='sakefolio-china-backup-'+today()+'.json';a.click();
      setTimeout(()=>URL.revokeObjectURL(url),60000);
@@ -437,13 +437,13 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
       <div className="international-collection-layout">
        <div className="international-collection-list">{own.map(r=><button type="button" key={r.id}
          aria-pressed={selected===r.id} onClick={()=>setSelected(r.id)}>
-         <span className="international-thumb"><PhotoPreview blob={r.photo} photoId={r.photoId} token={token} alt={r.brandName+'のラベル'}/></span>
+         <span className="international-thumb"><PhotoPreview blob={r.photo} photoId={r.photoId} token={token} folderId={storage?.photoFolderId} alt={r.brandName+'のラベル'}/></span>
          <span><strong>{r.productName}</strong><small>{KIND_NAME(r.kind)} · {r.brandName}</small>
            <small>{r.experience==='tasted'?'★ '+(r.rating||'未評価')+' · '+r.tastedAt:r.experience==='test'?'UXTEST／仮評価 '+(r.rating||'なし'):'商品情報のみ'} · {r.region||'産地未設定'}</small></span>
          <ArrowRight size={17}/></button>)}</div>
        {chosen&&<article className="international-record-detail">
          <button className="international-close" type="button" onClick={()=>setSelected('')}><X size={17}/> 閉じる</button>
-         <div className="international-detail-photo"><PhotoPreview blob={chosen.photo} photoId={chosen.photoId} token={token} alt={chosen.productName+'のラベル'}/></div>
+         <div className="international-detail-photo"><PhotoPreview blob={chosen.photo} photoId={chosen.photoId} token={token} folderId={storage?.photoFolderId} alt={chosen.productName+'のラベル'}/></div>
          <h3>{chosen.productName}</h3><p>{chosen.brandName} · {KIND_NAME(chosen.kind)} · {chosen.region}</p>
          {INTERNATIONAL_SENSORY[chosen.kind]&&
            <div className="international-detail-sensory">

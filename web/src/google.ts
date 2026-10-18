@@ -64,8 +64,15 @@ export function revokeAccess(token: string): Promise<RevocationResponse> {
   const revoke = typeof window === 'undefined' ? undefined : window.google?.accounts.oauth2.revoke;
   if (!revoke) return Promise.resolve({successful:false,error:'unavailable'});
   return new Promise(resolve => {
-    try { revoke(token,response => resolve(response)); }
-    catch { resolve({successful:false,error:'unavailable'}); }
+    let settled=false;
+    const finish=(result:RevocationResponse)=>{
+      if(settled)return;
+      settled=true;clearTimeout(watchdog);resolve(result);
+    };
+    // GIS callbacks sometimes never arrive. A timeout must never count as success.
+    const watchdog=setTimeout(()=>finish({successful:false,error:'timeout'}),10000);
+    try { revoke(token,response=>finish(response?.successful===true?{successful:true}:{successful:false,error:'unconfirmed'})); }
+    catch { finish({successful:false,error:'unavailable'}); }
   });
 }
 const APP_MARKER = 'sakefolio-react-v1';

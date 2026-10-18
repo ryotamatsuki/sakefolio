@@ -32,7 +32,7 @@ function emptyEntry(): RecordEntry {
     drinkingDate:todayLocal(),rating:'',aromaTagIds:'',tasteTagIds:'',sweetDry:'',lightRich:'',acidity:'',umami:'',notes:'',photoId:'',createdAt:''
   };
 }
-function Photo({ token, photoId, alt }: { token: string; photoId: string; alt: string }) {
+function Photo({ token, photoId, folderId, alt }: { token: string; photoId: string; folderId?:string; alt: string }) {
   const [url, setUrl] = useState('');
   const [error,setError] = useState('');
   const [retry,setRetry] = useState(0);
@@ -41,14 +41,14 @@ function Photo({ token, photoId, alt }: { token: string; photoId: string; alt: s
     let objectUrl = '';
     setUrl('');setError('');
     if (token && photoId) {
-      getPhotoBlob(token, photoId).then(blob => {
+      getPhotoBlob(token, photoId, folderId).then(blob => {
         objectUrl = URL.createObjectURL(blob);
         if (active) setUrl(objectUrl);
         else URL.revokeObjectURL(objectUrl);
       }).catch(error => { if (active) setError(error instanceof Error ? error.message : '写真の通信エラー。'); });
     }
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [token, photoId,retry]);
+  }, [token, photoId,folderId,retry]);
   return url ? <img className="record-photo" src={url} alt={alt} loading="lazy" onError={()=>{setUrl('');setError('画像形式を展開できません。JPEG・PNGで再登録してください。');}} /> : <div className="photo-fallback"><Wine size={30} strokeWidth={1.3}/>{error && <div role="alert">{error}<button type="button" onClick={()=>setRetry(v=>v+1)}>写真を再取得</button></div>}</div>;
 }
 function SectionEyebrow({ children }: { children: ReactNode }) {
@@ -324,7 +324,7 @@ export default function App() {
           <div className="subheading-row"><h3>最近の記録</h3><span>{records.length ? 'NEWEST FIRST' : 'YOUR COLLECTION STARTS HERE'}</span></div>
           {records.length ? <div className="records-grid">{records.map(r => <article className="record-card" key={r.reviewId}>
             <div className="record-media">
-              {r.photoId ? <Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル'}/> : <div className="photo-fallback"><Wine size={38} strokeWidth={1.2}/></div>}
+              {r.photoId ? <Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル'}/> : <div className="photo-fallback"><Wine size={38} strokeWidth={1.2}/></div>}
               {r.rating && <div className="rating-pill"><Star size={12} fill="currentColor"/> {r.rating}</div>}
             </div>
             <div className="record-card-body"><span className="record-date">{r.drinkingDate}</span>
@@ -603,7 +603,7 @@ export default function App() {
 
       {tab==='international' && <InternationalDrinks key={storage?.spreadsheetId||'local'} token={token} storage={storage} onConnect={connect}/>}
       {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
-        renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
+        renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}
       {tab==='places' && <section className="page-section interior-section">
         <div className="interior-head"><SectionEyebrow>ORIGIN & TERROIR</SectionEyebrow>
@@ -613,7 +613,7 @@ export default function App() {
         {coordinateStatus==='loading'&&<p className="sake-atlas__loading" role="status">酒蔵の位置情報を読み込んでいます。</p>}
         {coordinateStatus==='error'&&<p className="sake-atlas__warning" role="alert">酒蔵の位置データを読み込めませんでした。酒蔵名からのGoogleマップ検索は利用できます。</p>}
         <BreweryMap records={records} locations={breweryCoordinates}
-          renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
+          renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
           onRecordBrewery={g=>{
             selectBrewery({name:g.breweryName,prefecture:g.prefecture,
               municipality:'',address:g.address||g.coordinate?.address||'',count:0});

@@ -112,7 +112,7 @@ function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false
       assert.deepEqual(meta.parents,['test-photos']);
       assert.equal(meta.appProperties.sakefolioKind,'photo');
       assert.equal(files.has(meta.id),false,'must never duplicate an upload');
-      files.set(meta.id,meta);writes.push('Drive');
+      files.set(meta.id,{...meta,mimeType:'image/png',trashed:false});writes.push('Drive');
       if(failUpload&&!failed){failed=true;throw new TypeError('Upload response lost');}
       return json({id:meta.id});
     }
@@ -266,4 +266,45 @@ test('retry after successful persistence and failed UI refresh keeps exactly one
   await google.saveRecord('renewed',storage,record,[],null,attempt);
   assert.equal(state.tables.Reviews.length,2);
   assert.equal(state.writes.length,writes);
+});
+
+test('getPhotoBlob refuses non-Sakefolio IDs without downloading file bytes',async()=>{
+ let accessedMedia=false;
+ globalThis.fetch=async(input)=>{
+   const u=new URL(input);
+   if(u.searchParams.get('alt')==='media'){accessedMedia=true;return new Response(imageBytes);}
+   return json({id:u.pathname.split('/').at(-1),mimeType:'image/png',parents:['test-photos'],
+     appProperties:{sakefolioApp:'other-app',sakefolioKind:'photo'}});
+ };
+ await assert.rejects(google.getPhotoBlob('fake-token','wrong-photo-id','test-photos'),/管理する写真ではありません/);
+ assert.equal(accessedMedia,false);
+});
+test('getPhotoBlob enforces the expected app-owned photo folder and safe MIME',async()=>{
+ let contentRead=false;
+ const meta={id:'private-photo-id',mimeType:'image/png',parents:['other-folder'],
+   appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo'}};
+ globalThis.fetch=async(input)=>{
+   const u=new URL(input);
+   if(u.searchParams.get('alt')==='media'){contentRead=true;return new Response(imageBytes);}
+   return json(meta);
+ };
+ await assert.rejects(google.getPhotoBlob('fake-token',meta.id,'test-photos'),/管理する写真ではありません/);
+ assert.equal(contentRead,false);
+ meta.parents=['test-photos'];meta.mimeType='image/svg+xml';
+ await assert.rejects(google.getPhotoBlob('fake-token',meta.id,'test-photos'),/MIMEタイプ/);
+ assert.equal(contentRead,false);
+ meta.mimeType='image/png';
+ assert.deepEqual(new Uint8Array(await (await google.getPhotoBlob('fake-token',meta.id,'test-photos')).arrayBuffer()),imageBytes);
+ assert.equal(contentRead,true);
+});
+
+test('OAuth revoke never reports success if GIS callback does not arrive',async()=>{
+ const old=globalThis.setTimeout;
+ globalThis.window={google:{accounts:{oauth2:{revoke(){ /* no callback */ }}}}};
+ globalThis.setTimeout=(cb)=>{queueMicrotask(cb);return 1;};
+ try{
+  const result=await google.revokeAccess('fake-token');
+  assert.equal(result.successful,false);
+  assert.equal(result.error,'timeout');
+ }finally{globalThis.setTimeout=old;}
 });

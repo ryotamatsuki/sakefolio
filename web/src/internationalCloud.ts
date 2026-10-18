@@ -133,10 +133,13 @@ export async function saveChinaCloud(token:string,storage:StorageInfo,record:Int
      }else{
        if(!check.ok)throw Error('写真確認に失敗しました（HTTP '+check.status+'）。');
        const found=await check.json() as {parents?:string[];appProperties?:Record<string,string>};
-       if(!found.parents?.includes(storage.photoFolderId)||found.appProperties?.reviewId!==record.id)
+       if(!found.parents?.includes(storage.photoFolderId)||
+          found.appProperties?.sakefolioApp!=='sakefolio-react-v1'||
+          found.appProperties?.sakefolioKind!=='photo'||
+          found.appProperties?.reviewId!==record.id)
          throw Error('写真の保存先または記録IDが一致しません。');
      }
-     await getPhotoBlob(token,record.photoId);
+     await getPhotoBlob(token,record.photoId,storage.photoFolderId);
    }
    const row=serializeChinaRow(record);
    await sheetApi(token,endpoint(storage.spreadsheetId)+'/values/'+encodeURIComponent(location+'A:Q')+

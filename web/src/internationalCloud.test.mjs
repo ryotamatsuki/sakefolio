@@ -65,7 +65,7 @@ for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks retry after 
       const meta=JSON.parse(body.split('\r\n\r\n')[1].split('\r\n--')[0]);
       assert.equal(meta.id,'reserved-photo-id');
       assert.deepEqual(meta.parents,['test-photos']);
-      files.set(meta.id,meta);uploads++;
+      files.set(meta.id,{...meta,mimeType:'image/png',trashed:false});uploads++;
       return new Response(JSON.stringify({id:meta.id}));
     }
     if(url.hostname==='www.googleapis.com'&&url.pathname.startsWith('/drive/v3/files/')){

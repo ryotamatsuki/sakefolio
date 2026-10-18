@@ -16,3 +16,16 @@ test('unmount invalidates pending account data loads',()=>{
   gate.invalidate();
   assert.equal(pending(),false);
 });
+
+test('deferred save/reload callbacks cannot publish old-account results',async()=>{
+ const gate=createRequestGate();let resolveFirst;
+ const deferred=new Promise(resolve=>{resolveFirst=resolve;});
+ const seen=[];
+ const first=gate.begin();
+ const job=deferred.then(data=>{if(first())seen.push(data);});
+ const second=gate.begin();
+ if(second())seen.push('user-B');
+ resolveFirst('user-A');
+ await job;
+ assert.deepEqual(seen,['user-B']);
+});
