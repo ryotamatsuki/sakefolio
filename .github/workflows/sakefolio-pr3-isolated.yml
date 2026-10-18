@@ -40,7 +40,7 @@ jobs:
         working-directory: web
       - name: Run isolated UI smoke without real Google accounts or deployment
         run: |
-          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/sakefolio-preview.log 2>&1 &
+          GITHUB_PAGES=true npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/sakefolio-preview.log 2>&1 &
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:4173/sakefolio/ > /dev/null; then break; fi
             sleep 1
