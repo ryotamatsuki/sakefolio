@@ -16,11 +16,16 @@ try{
   serviceWorkers:'block'});
  const page=await ctx.newPage();
  page.on('pageerror',e=>{evidence.errors.push(String(e));});
+ page.on('console',m=>console.log('CONSOLE',m.type(),m.text().slice(0,500)));
+ page.on('requestfailed',req=>console.log('REQUEST_FAILED',req.url(),req.failure()));
+ page.on('response',resp=>{if(resp.url().includes('/assets/'))console.log('ASSET_RESPONSE',resp.status(),resp.url());});
  await step('compiled app loads from isolated localhost URL',async()=>{
    const resp=await page.goto(root,{waitUntil:'domcontentloaded'});
    assert.equal(resp?.status(),200);
    await page.waitForTimeout(2500);
-   console.log('PAGE_BODY', (await page.locator('body').innerText()).slice(0,1500));
+   console.log('PAGE_URL',page.url());
+   console.log('PAGE_HTML',(await page.content()).slice(0,1800));
+   console.log('PAGE_BODY',(await page.locator('body').innerText()).slice(0,1500));
    console.log('PAGE_ERRORS',JSON.stringify(evidence.errors));
    await page.screenshot({path:dir+'/initial.png',fullPage:true});
    await page.locator('.mobile-nav button').filter({hasText:'中国のお酒'}).click();
