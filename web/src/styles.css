@@ -823,3 +823,15 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 .international-spec-cards small{font-size:11px;color:#749078}
 .international-spec-cards span{font-size:10px;color:#859c87}
 @media(max-width:650px){.international-spec-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Daily-use record management: focus-visible, touch targets and safe wrapping. */
+.record-actions{display:flex;flex-wrap:wrap;gap:.65rem;align-items:center;margin:1rem 0}
+.record-actions button,.trash-panel button{border:1px solid #8c9c88;border-radius:8px;padding:.6rem .85rem;
+ background:#f8faf7;color:#23422f;font:inherit;cursor:pointer;min-height:42px}
+.record-actions button:hover,.trash-panel button:hover{background:#e5f0e7}
+.record-actions button:focus-visible,.trash-panel button:focus-visible{outline:3px solid #416d46;outline-offset:2px}
+.record-actions button:disabled,.trash-panel button:disabled{opacity:.5;cursor:not-allowed}
+.trash-panel,.preference-card{border:1px solid #c5d6c5;border-radius:14px;padding:1rem 1.25rem;margin:1.5rem 0;
+ background:#f4f8f3;overflow-wrap:anywhere}
+.trash-panel p,.preference-card p{margin:.5rem 0;font-size:.95rem;line-height:1.65}
+@media(max-width:640px){.record-actions button{flex:1 1 auto}.trash-panel{padding:1rem}}

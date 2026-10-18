@@ -401,3 +401,54 @@ export async function inspectStorage(token: string, storage: StorageInfo): Promi
   const unusedBottles = bottles.slice(1).filter(r=>r[0] && !usedBottles.has(r[0])).length;
   return '保存先確認：記録 '+reviewIds.size+'件、写真情報 '+photoLinks.length+'件。写真ファイル不足 '+missing+'件、未紐付け画像 '+orphan+'件、記録未完了の写真情報 '+incomplete+'件、写真情報不足 '+missingLinks+'件、未紐付け商品 '+unusedBottles+'件。データは変更していません。';
 }
+
+/** Optimistic editing of one Reviews snapshot. Never create a new row silently.
+ * Bottle table remains an immutable historical snapshot; Reviews carries
+ * the user's corrected display and analysis fields.
+ */
+export async function updateReview(token:string,storage:StorageInfo,
+ original:RecordEntry,changed:RecordEntry,replacement?:File|null):Promise<RecordEntry>{
+ if(!original.reviewId||changed.reviewId!==original.reviewId||changed.createdAt!==original.createdAt)
+  throw Error('編集する記録のIDまたは作成日時が不正です。');
+ validateRecordInput(changed);
+ const key=storage.spreadsheetId+':'+original.reviewId;
+ if(activeSaves.has(key))throw Error('同じ記録の更新が進行中です。');
+ activeSaves.add(key);
+ try{
+  const all=await getRows(token,storage.spreadsheetId,'Reviews');
+  if(TABLE_HEADERS.Reviews.some((h,i)=>all[0]?.[i]!==h))
+   throw Error('Reviewsの列が変更されています。');
+  const matches=all.map((row,index)=>({row,index})).filter(x=>x.index>0&&x.row[0]===original.reviewId);
+  if(matches.length!==1)throw Error('編集対象が見つからないか重複しています。');
+  const {row,index}=matches[0],keys=TABLE_HEADERS.Reviews;
+  const raw=(data:RecordEntry,k:string):string=>
+   k==='comment'?data.notes:String((data as unknown as Record<string,string>)[k]||'');
+  // A previous edit elsewhere should not be overwritten with a stale form.
+  const changedFields=keys.filter(k=>!['updatedAt'].includes(k));
+  if(changedFields.some(k=>String(row[keys.indexOf(k)]||'')!==raw(original,k)))
+   throw Error('別の画面で記録が変更されました。再読み込みしてください。');
+  // Keep system IDs and creation date unchanged, regardless of client form.
+  const next:{[key:string]:string}={...changed,
+    reviewId:original.reviewId,brandId:original.brandId,
+    bottleId:row[keys.indexOf('bottleId')]||'',
+    photoId:original.photoId,createdAt:original.createdAt,
+    updatedAt:new Date().toISOString(),comment:changed.notes
+  };
+  if(replacement){
+   // The caller supplies the already re-encoded PNG produced by createPhotoPreview.
+   const type=await verifyPhoto(replacement);
+   if(type.mime!=='image/png')throw Error('編集写真を先にPNGへ安全変換してください。');
+   const photoId=await uploadPhoto(token,storage.photoFolderId,replacement,undefined,original.reviewId);
+   next.photoId=photoId;
+  }
+  const pos=index+1,body=keys.map(k=>next[k]||'');
+  await api(token,'https://sheets.googleapis.com/v4/spreadsheets/'+storage.spreadsheetId+
+    '/values/'+encodeURIComponent("'Reviews'!A"+pos+':AF'+pos)+'?valueInputOption=RAW',
+    {method:'PUT',body:JSON.stringify({values:[body]})});
+  const after=await getRows(token,storage.spreadsheetId,'Reviews');
+  const confirmed=after.slice(1).filter(r=>r[0]===original.reviewId);
+  if(confirmed.length!==1||keys.some((_,i)=>String(confirmed[0][i]||'')!==body[i]))
+   throw Error('編集結果を確認できません。最新データを読み込んでください。');
+  return {...changed,photoId:next.photoId};
+ }finally{activeSaves.delete(key);}
+}
