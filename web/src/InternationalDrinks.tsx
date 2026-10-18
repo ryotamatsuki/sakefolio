@@ -277,26 +277,31 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
    finally{if(isCurrent())setBusy(false);}
  };
  const backup=async()=>{
-   setError('');setStatus('');
+   const isCurrent=loadGate.current.begin();setError('');setStatus('');
    try{
      const complete=await Promise.all(records.map(async r=>({...r,
        photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId,storage?.photoFolderId):null)})));
-     const blob=await buildBackup(complete),url=URL.createObjectURL(blob),a=document.createElement('a');
+     const blob=await buildBackup(complete);if(!isCurrent())return;
+     const url=URL.createObjectURL(blob),a=document.createElement('a');
      a.href=url;a.download='sakefolio-china-backup-'+today()+'.json';a.click();
      setTimeout(()=>URL.revokeObjectURL(url),60000);
      setStatus('バックアップのダウンロードを開始しました。端末外にも安全に保管してください。');
-   }catch(e){setError(e instanceof Error?e.message:'書き出しに失敗しました。');}
+   }catch(e){if(isCurrent())setError(e instanceof Error?e.message:'書き出しに失敗しました。');}
  };
  const restore=async(e:ChangeEvent<HTMLInputElement>)=>{
    const file=e.target.files?.[0];e.target.value='';if(!file)return;
+   if(token){setError('クラウド接続中は端末内バックアップを復元できません。接続解除後に操作してください。');return;}
+   const isCurrent=loadGate.current.begin();
    if(!window.confirm('バックアップを読み込みます。既存IDは上書きせず、重複を追加しません。続行しますか？'))return;
    setBusy(true);setError('');setStatus('');
    try{
-     const outcome=await restoreBackup(file);await load();
+     const outcome=await restoreBackup(file);
+     if(!isCurrent())return;
+     await load(isCurrent);if(!isCurrent())return;
      setStatus('端末内へ復元しました：新規'+outcome.added+'件、既存重複'+outcome.duplicates+'件。Google Driveへは自動移行しません。');
      setSection('collection');
-   }catch(x){await load();setError(x instanceof Error?x.message:'復元できませんでした。');}
-   finally{setBusy(false);}
+   }catch(x){if(isCurrent()){await load(isCurrent);if(isCurrent())setError(x instanceof Error?x.message:'復元できませんでした。');}}
+   finally{if(isCurrent())setBusy(false);}
  };
  return <section className="page-section international-page">
    <div className="interior-head"><span className="taste-eyebrow">SAKEFOLIO · CHINA / INTERNATIONAL LAB</span>
@@ -500,7 +505,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
          <button type="button" onClick={()=>void backup()} disabled={!ready||!records.length}><Download size={16}/> 写真付きJSONバックアップ</button>
          <button type="button" disabled={!records.length}
            onClick={()=>downloadCsv('sakefolio-china.csv',records.map(({photo,...fields})=>fields))}>CSV書出し</button>
-         <label><Upload size={16}/> バックアップを復元<input type="file" accept=".json,application/json" onChange={e=>void restore(e)} disabled={busy}/></label>
+         <label><Upload size={16}/> バックアップを復元<input type="file" accept=".json,application/json" onChange={e=>void restore(e)} disabled={busy||!!token}/></label>
        </div>
      </div>
      {!!(token&&storage?trash.filter(t=>t.kind==='china').length:localTrash.length)&&
