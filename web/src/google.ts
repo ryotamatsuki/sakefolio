@@ -71,7 +71,7 @@ export function revokeAccess(token: string): Promise<RevocationResponse> {
     };
     // GIS callbacks sometimes never arrive. A timeout must never count as success.
     const watchdog=setTimeout(()=>finish({successful:false,error:'timeout'}),10000);
-    try { revoke(token,response=>finish(response?.successful===true?{successful:true}:{successful:false,error:'unconfirmed'})); }
+    try { revoke(token,response=>finish(response?.successful===true?{successful:true}:{successful:false,error:typeof response?.error==='string'?response.error:'unconfirmed'})); }
     catch { finish({successful:false,error:'unavailable'}); }
   });
 }
@@ -232,14 +232,38 @@ export async function uploadPhoto(token: string, folderId: string, file: File, i
   if (!result.id) throw new Error('写真保存後のファイルIDを取得できませんでした。');
   return result.id;
 }
-export async function getPhotoBlob(token: string, id: string): Promise<Blob> {
-  const response = await fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?alt=media',
-    {signal:AbortSignal.timeout(45000),headers: {Authorization:'Bearer ' + token}}).catch(() => { throw new Error('写真の通信エラー。接続を確認してください。'); });
+/** Refuse IDs from spreadsheet text unless they still designate an app-owned
+ * photo in the current Sakefolio photo folder. Never download arbitrary Drive files.
+ * A Sheet cell is untrusted even when read through the user's own OAuth token.
+ */
+export async function getPhotoBlob(token: string, id: string, expectedFolderId?: string): Promise<Blob> {
+  if (!/^[\\w-]{8,200}$/.test(id))
+    throw new Error('写真IDが正しい形式ではありません。');
+  const url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id);
+  const meta=await api<{id?:string;mimeType?:string;parents?:string[];trashed?:boolean;
+    appProperties?:Record<string,string>}>(token,url+'?fields=id,mimeType,parents,trashed,appProperties');
+  if (meta.id!==id||meta.trashed===true||
+    meta.appProperties?.sakefolioApp!==APP_MARKER||meta.appProperties?.sakefolioKind!=='photo'||
+    (expectedFolderId&&!meta.parents?.includes(expectedFolderId)))
+    throw new Error('指定されたファイルはSakefolioが管理する写真ではありません。');
+  // The app never creates active-content MIME types.
+  if (!meta.mimeType||!['image/jpeg','image/png','image/webp','image/heic','image/heif','image/avif'].includes(meta.mimeType))
+    throw new Error('写真のMIMEタイプが許可されていません。');
+  const response=await fetch(url+'?alt=media',{
+    signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}
+  }).catch(()=>{throw new Error('写真の通信エラー。接続を確認してください。');});
   if (!response.ok) throw extractError(undefined,response.status);
-  const blob = await response.blob();
-  if (!blob.size || blob.size > 10 * 1024 * 1024 || !detectPhotoType(new Uint8Array(await blob.slice(0,32).arrayBuffer())))
-    throw new Error('保存された写真が未対応の形式です。');
-  return blob;
+  const contentLength=Number(response.headers.get('Content-Length')||'0');
+  if(contentLength>10*1024*1024)throw new Error('写真の容量が制限を超えています。');
+  const blob=await response.blob();
+  const verified=blob.size&&blob.size<=10*1024*1024?
+    detectPhotoType(new Uint8Array(await blob.slice(0,32).arrayBuffer())):null;
+  if(!verified||(verified.mime!==meta.mimeType &&
+    !(verified.mime==='image/heic'&&meta.mimeType==='image/heif') &&
+    !(verified.mime==='image/heif'&&meta.mimeType==='image/heic')))
+    throw new Error('保存された写真が未対応の形式、またはMIMEタイプと不一致です。');
+  // Safe, verified MIME is assigned explicitly instead of trusting response headers.
+  return blob.type===verified.mime?blob:new Blob([blob],{type:verified.mime});
 }
 export interface SaveAttempt {
   reviewId: string;
@@ -324,7 +348,9 @@ export async function saveRecord(
       else {
         if (!response.ok) throw extractError(undefined,response.status);
         const found = await response.json() as {parents?:string[];appProperties?:Record<string,string>};
-        if (!found.parents?.includes(storage.photoFolderId) || found.appProperties?.reviewId !== attempt.reviewId)
+        if (!found.parents?.includes(storage.photoFolderId) ||
+          found.appProperties?.sakefolioApp!==APP_MARKER||found.appProperties?.sakefolioKind!=='photo'||
+          found.appProperties?.reviewId !== attempt.reviewId)
           throw new Error('写真の保存先または記録IDが一致しません。');
       }
       stage = '写真の再取得確認';
