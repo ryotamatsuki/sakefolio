@@ -1,0 +1,58 @@
+name: Sakefolio PR3 isolated browser QA
+on:
+  push:
+    branches:
+      - audit/sakefolio-pr3-isolated-20261019
+    paths:
+      - "web/**"
+      - ".github/workflows/sakefolio-pr3-isolated.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: npm audit --audit-level=high
+        working-directory: web
+      - run: npm run test:security
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+        env:
+          GITHUB_PAGES: "true"
+          VITE_GOOGLE_CLIENT_ID: "ISOLATED_TEST_CLIENT"
+      - name: Install headless Chromium for independent browser validation
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Run isolated UI smoke without real Google accounts or deployment
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/sakefolio-preview.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/sakefolio/ > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/sakefolio/ > /dev/null
+          node scripts/pr3-isolated-smoke.mjs
+        working-directory: web
+      - name: Upload non-sensitive browser QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr3-isolated-browser-evidence
+          path: web/artifacts/pr3-qa
+          if-no-files-found: ignore
+          retention-days: 3
