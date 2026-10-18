@@ -95,7 +95,7 @@ function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false
       const table=range.match(/^'([^']+)'/)?.[1];
       assert.ok(tables[table], 'unexpected table');
       if(init.method==='PUT'){
-        const position=Number(range.match(/!A(\\d+):/)?.[1]);
+        const position=Number(range.match(/!A(\d+):/)?.[1]);
         assert.ok(position>=2&&position<=tables[table].length);
         tables[table][position-1]=JSON.parse(init.body).values[0];
         writes.push('edit:'+table);

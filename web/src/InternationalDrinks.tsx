@@ -195,7 +195,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
    setQuery(p.brandName||'');
  };
  const lookupBarcode=async(code:string)=>{
-   if(!/^\\d{8,14}$/.test(code)){setError('JAN/EANバーコードは8〜14桁の数字を入力してください。');return;}
+   if(!/^\d{8,14}$/.test(code)){setError('JAN/EANバーコードは8〜14桁の数字を入力してください。');return;}
    setOffState('loading');setError('');
    try{
      const u='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
@@ -218,7 +218,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
      try{codes=await new Detector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}).detect(bitmap);}
      finally{bitmap.close();}
      if(!codes.length){setError('バーコードを読み取れませんでした。正面から撮影するか番号を入力してください。');return;}
-     const code=codes.map(x=>x.rawValue).find(x=>/^\\d{8,14}$/.test(x));
+     const code=codes.map(x=>x.rawValue).find(x=>/^\d{8,14}$/.test(x));
      if(!code){setError('対応するJAN/EANバーコードがありません。');return;}
      setBarcode(code);await lookupBarcode(code);
    }catch{setError('画像からバーコードを読み取れませんでした。番号を入力してください。');}
