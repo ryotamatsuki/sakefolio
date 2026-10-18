@@ -576,6 +576,7 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 .international-kinds button span{font-size:11px;color:#78907a;line-height:1.6}
 .international-layout{display:grid;grid-template-columns:minmax(250px,0.84fr) minmax(0,1.6fr);gap:18px;align-items:start}
 .international-finder,.international-form{background:#fff;border:1px solid #e1e9dc;border-radius:14px;padding:24px;min-width:0}
+.international-form-fields{border:0;padding:0;margin:0;min-width:0}
 .international-finder h2,.international-form h2{font-family:'Noto Serif JP',serif;color:#2a5335;font-size:18px;display:flex;align-items:center;gap:10px;margin-bottom:19px}
 .international-finder h3{font-size:15px;color:#2d5538;margin:25px 0 9px}
 .international-finder p{font-size:11px;line-height:1.85;color:#788a7b;margin-bottom:12px}

@@ -15,9 +15,9 @@ const json = (body, status=200) => new Response(JSON.stringify(body), {status});
 test.afterEach(() => { globalThis.fetch = realFetch; delete globalThis.window; });
 
 const previewSource = readFileSync(new URL('./photos.ts',import.meta.url),'utf8')
-  .replace("from './security'", `from '${securityUrl}'`);
+  .replace("from './security.ts'", `from '${securityUrl}'`);
 const previewCompiled = ts.transpileModule(previewSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {createPhotoPreview} = await import('data:text/javascript;base64,'+Buffer.from(previewCompiled).toString('base64'));
+const {createPhotoPreview,sanitizePhotoForStorage} = await import('data:text/javascript;base64,'+Buffer.from(previewCompiled).toString('base64'));
 test('preview rejects HTML/SVG before invoking a browser decoder',async()=>{
   await assert.rejects(createPhotoPreview(new File(['<svg onload="alert(1)"></svg>'],'x.svg',{type:'image/svg+xml'})),/形式/);
   await assert.rejects(createPhotoPreview(new File(['<html>bad</html>'],'x.png',{type:'image/png'})),/形式/);
@@ -45,6 +45,14 @@ test('OAuth cancellation rejects and requests only drive.file without accumulate
     }};
   }}}}};
   await assert.rejects(google.requestGoogleAccess(),/中断/);
+});
+test('Google permission revocation reports both success and failure',async()=>{
+  globalThis.window={google:{accounts:{oauth2:{revoke(_token,callback){callback({successful:true});}}}}};
+  assert.deepEqual(await google.revokeAccess('fake-token'),{successful:true});
+  globalThis.window={google:{accounts:{oauth2:{revoke(_token,callback){callback({successful:false,error:'access_denied'});}}}}};
+  assert.deepEqual(await google.revokeAccess('fake-token'),{successful:false,error:'access_denied'});
+  delete globalThis.window;
+  assert.equal((await google.revokeAccess('fake-token')).successful,false);
 });
 test('duplicate app-owned storage stops before any write',async()=>{
   globalThis.fetch=async (url,init)=>{
@@ -213,6 +221,21 @@ test('preview normalizes HEIC using Safari image fallback and closes object URL'
     const portable=await createPhotoPreview(heic);
     assert.equal(portable.type,'image/png');assert.equal(drawn,true);
   } finally {Object.assign(globalThis,old);}
+});
+test('photo persistence re-encodes the image and drops embedded metadata',async()=>{
+  const old={createImageBitmap:globalThis.createImageBitmap,document:globalThis.document};
+  globalThis.createImageBitmap=async()=>({width:800,height:600,close(){}});
+  globalThis.document={createElement(){return {getContext(){return {drawImage(){}};},toBlob(cb,type){
+    assert.equal(type,'image/png');cb(new Blob([imageBytes],{type}));
+  }};}};
+  const source=new File([new Uint8Array([0xff,0xd8,0xff,...Buffer.from('EXIF-SECRET-LOCATION')])],'photo.jpg',{type:'image/jpeg'});
+  try{
+    const sanitized=await sanitizePhotoForStorage(source);
+    assert.equal(sanitized.type,'image/png');
+    assert.equal(sanitized.name,'sakefolio-label.png');
+    assert.equal((await sanitized.text()).includes('EXIF-SECRET-LOCATION'),false);
+    assert.deepEqual(new Uint8Array(await sanitized.arrayBuffer()),imageBytes);
+  }finally{Object.assign(globalThis,old);}
 });
 test('corrupted raster and unsupported HEIC stop before a preview can be saved',async()=>{
   const old={createImageBitmap:globalThis.createImageBitmap,Image:globalThis.Image};

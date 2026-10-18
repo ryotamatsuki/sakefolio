@@ -40,11 +40,12 @@ export interface RecordEntry {
 }
 export interface StorageInfo { folderId: string; spreadsheetId: string; photoFolderId: string }
 export interface TokenResponse { access_token?: string; error?: string; error_description?: string }
+export interface RevocationResponse { successful: boolean; error?: string; error_description?: string }
 declare global {
   interface Window {
     google?: { accounts: { oauth2: {
       initTokenClient: (options: { client_id: string; scope: string; include_granted_scopes?: boolean; callback: (response: TokenResponse) => void; error_callback?: (error: unknown) => void; }) => { requestAccessToken: (options?: { prompt?: string }) => void };
-      revoke: (token: string, callback: () => void) => void;
+      revoke: (token: string, callback: (response: RevocationResponse) => void) => void;
     } } };
   }
 }

@@ -149,10 +149,18 @@ export default function App() {
   const disconnect = () => {
     if (operation.current) return;
     pendingSave.current = null;setSelectedPhoto(null);
-    ++session.current;
-    if (token) revokeAccess(token);
+    const current=++session.current;
+    const revocation=token?revokeAccess(token):Promise.resolve({successful:true});
     setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
-    setPhoto(null);setEntry(emptyEntry());setMessage('接続を解除しました。');setMenuOpen(false);
+    setPhoto(null);setEntry(emptyEntry());
+    setMessage(token?'Sakefolioの接続を解除しました。Google側の権限解除を確認しています。':'Sakefolioの接続を解除しました。');
+    setMenuOpen(false);
+    void revocation.then(result=>{
+      if(session.current!==current||!token)return;
+      setMessage(result.successful
+        ?'Sakefolioの接続とGoogle側の権限を解除しました。'
+        :'Sakefolioの接続は解除しましたが、Google側の権限取り消しを確認できませんでした。Googleアカウント設定で確認してください。');
+    });
   };
   const update = (field: keyof RecordEntry, value: string) => setEntry(e => ({...e, [field]:value}));
   const toggleAroma = (id: string) => setEntry(e=>({...e, aromaTagIds:toggleIds(e.aromaTagIds,id)}));
@@ -593,7 +601,7 @@ export default function App() {
         </form>
       </section>}
 
-      {tab==='international' && <InternationalDrinks token={token} storage={storage} onConnect={connect}/>} 
+      {tab==='international' && <InternationalDrinks key={storage?.spreadsheetId||'local'} token={token} storage={storage} onConnect={connect}/>}
       {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
         renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}

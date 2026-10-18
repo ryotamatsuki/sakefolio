@@ -2,7 +2,7 @@ name: Sakefolio CodeQL security scan
 
 on:
   push:
-    branches: [main, feat/react-drive-sakefolio]
+    branches: [main, feat/react-drive-sakefolio, security/sakefolio-audit-2026]
     paths:
       - 'web/**'
       - '.github/workflows/**'

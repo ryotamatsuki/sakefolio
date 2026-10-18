@@ -1,4 +1,4 @@
-import type { Brand, RecordEntry, StorageInfo, TokenResponse } from './types';
+import type { Brand, RecordEntry, RevocationResponse, StorageInfo, TokenResponse } from './types';
 import { detectPhotoType, validateRecordInput, verifyPhoto } from './security';
 
 /**
@@ -60,8 +60,13 @@ export async function requestGoogleAccess(): Promise<string> {
     client.requestAccessToken({ prompt: 'select_account' });
   });
 }
-export function revokeAccess(token: string) {
-  window.google?.accounts.oauth2.revoke(token, () => undefined);
+export function revokeAccess(token: string): Promise<RevocationResponse> {
+  const revoke = typeof window === 'undefined' ? undefined : window.google?.accounts.oauth2.revoke;
+  if (!revoke) return Promise.resolve({successful:false,error:'unavailable'});
+  return new Promise(resolve => {
+    try { revoke(token,response => resolve(response)); }
+    catch { resolve({successful:false,error:'unavailable'}); }
+  });
 }
 const APP_MARKER = 'sakefolio-react-v1';
 type FileKind = 'root' | 'photos-folder' | 'spreadsheet' | 'photo';

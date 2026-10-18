@@ -3,8 +3,9 @@
  */
 import type {StorageInfo} from './types';
 import type {InternationalRecord} from './internationalLocal';
-import {validateInternationalRecord} from './internationalLocal';
-import {uploadPhoto,getPhotoBlob} from './google';
+import {validateInternationalRecord} from './internationalLocal.ts';
+import {uploadPhoto,getPhotoBlob} from './google.ts';
+import {sanitizePhotoForStorage} from './photos.ts';
 
 export const CHINA_TABLE='ChinaDrinks';
 export const CHINA_HEADERS=[
@@ -113,9 +114,29 @@ export async function saveChinaCloud(token:string,storage:StorageInfo,record:Int
      return;
    }
    if(photoFile){
-     // New photo is created under the Sakefolio app's own Drive photo folder.
-     const fileId=await uploadPhoto(token,storage.photoFolderId,photoFile,undefined,record.id);
-     await getPhotoBlob(token,fileId);record.photoId=fileId;
+     // Reserve and retain the ID before upload. A retry can find or recreate this
+     // exact private Drive file after an uncertain upload/Sheets response.
+     if(!record.photoId){
+       const reserved=await fetch('https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files',{
+         signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}});
+       if(!reserved.ok)throw Error('写真IDを予約できません（HTTP '+reserved.status+'）。');
+       const ids=await reserved.json() as {ids?:string[]};
+       if(!ids.ids?.[0])throw Error('写真IDを予約できませんでした。');
+       record.photoId=ids.ids[0];
+     }
+     const check=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(record.photoId)+'?fields=id,parents,appProperties',{
+       signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}})
+       .catch(()=>{throw Error('写真確認中の通信エラー。再試行してください。');});
+     if(check.status===404){
+       const safePhoto=await sanitizePhotoForStorage(photoFile);
+       await uploadPhoto(token,storage.photoFolderId,safePhoto,record.photoId,record.id);
+     }else{
+       if(!check.ok)throw Error('写真確認に失敗しました（HTTP '+check.status+'）。');
+       const found=await check.json() as {parents?:string[];appProperties?:Record<string,string>};
+       if(!found.parents?.includes(storage.photoFolderId)||found.appProperties?.reviewId!==record.id)
+         throw Error('写真の保存先または記録IDが一致しません。');
+     }
+     await getPhotoBlob(token,record.photoId);
    }
    const row=serializeChinaRow(record);
    await sheetApi(token,endpoint(storage.spreadsheetId)+'/values/'+encodeURIComponent(location+'A:Q')+

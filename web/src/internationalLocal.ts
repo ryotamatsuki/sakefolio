@@ -1,6 +1,7 @@
-import {detectPhotoType,verifyPhoto} from './security.ts';
+import {detectPhotoType} from './security.ts';
 import {BEVERAGE_KINDS} from './internationalCatalog.ts';
 import {validateTechnicalSpecs} from './internationalInput.ts';
+import {sanitizePhotoForStorage} from './photos.ts';
 import type {BeverageKind} from './internationalCatalog.ts';
 
 const DB='sakefolio-international-local-v1';
@@ -85,7 +86,7 @@ export async function listInternationalRecords():Promise<InternationalRecord[]>{
  return values.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
 }
 export async function saveInternationalRecord(data:InternationalRecord,photoFile:File|null):Promise<void>{
- if(photoFile){await verifyPhoto(photoFile);data.photo=photoFile;}
+ if(photoFile)data.photo=await sanitizePhotoForStorage(photoFile);
  validateInternationalRecord(data);
  // add() prevents overwriting another tasting with the same ID.
  await requestStore('readwrite',s=>s.add(data));

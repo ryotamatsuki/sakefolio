@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import type {ChangeEvent,FormEvent} from 'react';
 import {ArrowRight,BookOpen,Camera,Download,ExternalLink,Info,MapPin,Search,ShieldCheck,Upload,Wine,X} from 'lucide-react';
 import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts,normalizeWikidataResults} from './internationalCatalog';
@@ -15,6 +15,7 @@ import type {ChinaOsmSnapshot,OsmFacility} from './internationalOsm';
 import InternationalProducerMap from './InternationalProducerMap';
 import InternationalInsights from './InternationalInsights';
 import {INTERNATIONAL_SENSORY,splitDescriptorTags,toggleDescriptorTag} from './internationalSensory';
+import {createRequestGate} from './requestGate';
 
 const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
 interface Props {token:string;storage:StorageInfo|null;onConnect:()=>void}
@@ -70,6 +71,9 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [error,setError]=useState('');
  const [ready,setReady]=useState(false);
  const [selected,setSelected]=useState<string>('');
+ const [pendingCloudSheet,setPendingCloudSheet]=useState('');
+ const pendingCloudSave=useRef<{spreadsheetId:string;record:InternationalRecord;photo:File|null}|null>(null);
+ const loadGate=useRef(createRequestGate());
  const [filter,setFilter]=useState<BeverageKind|'all'>('all');
  const [lastSearch,setLastSearch]=useState(0);
  const [section,setSection]=useState<'new'|'collection'|'map'|'insights'>('new');
@@ -79,17 +83,26 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const masterMatches=useMemo(()=>chinaMasterSearch(master.rows,kind,query,30),[master.rows,kind,query]);
  const own=useMemo(()=>records.filter(r=>filter==='all'||r.kind===filter),[records,filter]);
  const chosen=records.find(x=>x.id===selected);
- const load=async()=>{
+ const load=async(isCurrent:()=>boolean=()=>true)=>{
    setCloudLoading(Boolean(token&&storage));
    try{
      const local=await listInternationalRecords();
+     if(!isCurrent())return;
      setLocalCount(local.length);
      const actual=token&&storage?await loadChinaCloud(token,storage):local;
+     if(!isCurrent())return;
      setRecords(actual);setReady(true);setError('');
-   }catch(e){setReady(false);setError(e instanceof Error?e.message:'記録を読み込めません。');}
-   finally{setCloudLoading(false);}
+   }catch(e){if(isCurrent()){setReady(false);setError(e instanceof Error?e.message:'記録を読み込めません。');}}
+   finally{if(isCurrent())setCloudLoading(false);}
  };
- useEffect(()=>{void load();},[token,storage?.spreadsheetId]);
+ useEffect(()=>{
+   let active=true;
+   const current=loadGate.current.begin();
+   const isCurrent=()=>active&&current();
+   setRecords([]);setReady(false);setSelected('');
+   void load(isCurrent);
+   return()=>{active=false;loadGate.current.invalidate();};
+ },[token,storage?.spreadsheetId]);
  useEffect(()=>{
    let active=true;
    const url=import.meta.env.BASE_URL+'china-wikidata-master.json';
@@ -160,7 +173,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const save=async(e:FormEvent)=>{
    e.preventDefault();if(busy||!ready)return;
    setBusy(true);setStatus('');setError('');
-   const record:InternationalRecord={
+   let record:InternationalRecord={
      id:crypto.randomUUID(),kind,brandName:data.brandName.trim(),productName:data.productName.trim(),
      producer:data.producer.trim(),region:data.region.trim(),country:'中国',
      sourceUrl:data.sourceUrl,attributes:Object.fromEntries(Object.entries(data.attributes).filter(([,v])=>!!v.trim())),
@@ -170,9 +183,21 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
      notes:data.experience==='test'?'【UXTEST・本人未試飲】'+data.notes.trim():data.notes.trim(),
      createdAt:new Date().toISOString(),photo:null
    };
+   let photoToSave=photo;
+   if(token&&storage){
+     const pending=pendingCloudSave.current;
+     if(pending&&pending.spreadsheetId===storage.spreadsheetId){
+       record=pending.record;photoToSave=pending.photo;
+     }else{
+       pendingCloudSave.current={spreadsheetId:storage.spreadsheetId,record,photo};
+       setPendingCloudSheet(storage.spreadsheetId);
+     }
+   }
    try{
-     if(token&&storage)await saveChinaCloud(token,storage,record,photo);
-     else await saveInternationalRecord(record,photo);
+     if(token&&storage){
+       await saveChinaCloud(token,storage,record,photoToSave);
+       if(pendingCloudSave.current?.spreadsheetId===storage.spreadsheetId){pendingCloudSave.current=null;setPendingCloudSheet('');}
+     }else await saveInternationalRecord(record,photo);
      await load();setData(initial(kind));setPhoto(null);setQuery('');setOffResults([]);setOffState('idle');
      setSection('collection');
      setStatus(token&&storage?'Google Sheetsに保存し、読み戻して確認しました。':'端末内に保存しました。Google Driveには同期していません。');
@@ -209,13 +234,13 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
    <div className="international-notice" role="note"><ShieldCheck size={19}/>
      {token&&storage?<div>
        <strong>Google Drive接続中 — 中国酒は専用「ChinaDrinks」シートに保存</strong>
-       <p>日本酒の記録には混ぜません。写真はSakefolioの写真フォルダへ保存します。
+       <p>日本酒の記録には混ぜません。写真はメタデータを取り除いてからSakefolioの写真フォルダへ保存します。
          UXTESTデータは仮評価であり、本人の飲酒体験ではありません。{cloudLoading?'Google Sheetsを読み込み中…':''}</p>
        {!!localCount&&<p>以前の端末内記録 {localCount}件があります。自動移行していません。
          接続を解除すると端末内記録を確認できます。</p>}
      </div>:<div>
        <strong>現在は端末内保存（Google未接続）</strong>
-       <p>接続するとあなたのGoogle DriveにあるChinaDrinksを読み込み、新規記録もGoogleへ保存します。
+       <p>接続するとあなたのGoogle DriveにあるChinaDrinksを読み込み、新規記録もGoogleへ保存します。写真は保存前にメタデータを取り除きます。
          端末内記録は自動移行しません。中国本土からのGoogle接続は制限される場合があります。</p>
        <button type="button" className="international-lookup" onClick={onConnect}>Googleに接続して保存する</button>
      </div>}
@@ -285,6 +310,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
       </div>
       <form className="international-form" onSubmit={save}>
         <h2><BookOpen size={19}/> {config.name}の記録</h2>
+        <fieldset disabled={busy||!!pendingCloudSheet&&pendingCloudSheet===storage?.spreadsheetId} className="international-form-fields">
         <div className="field-grid two">
           <label>ブランド名 <span className="required">必須</span><input required maxLength={200} value={data.brandName} onChange={e=>setField('brandName',e.target.value)} placeholder="商品に記載された銘柄名"/></label>
           <label>商品・シリーズ名 <span className="required">必須</span><input required maxLength={200} value={data.productName} onChange={e=>setField('productName',e.target.value)} placeholder="正式な商品名"/></label>
@@ -369,9 +395,10 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           <input type="file" accept="image/*" onChange={e=>setPhoto(e.target.files?.[0]||null)}/>
         </label>
         {photo&&<button type="button" className="international-photo-clear" onClick={()=>setPhoto(null)}>写真を取り消す <X size={14}/></button>}
+        </fieldset>
         <button type="submit" disabled={!ready||busy} className="button button-dark international-save">
           {busy?'保存中…':token&&storage?'Google Driveに保存する':'この端末に保存する'} <ArrowRight size={17}/></button>
-        <p className="international-small">日本酒の表とは別の「ChinaDrinks」に保存します。端末内からGoogleへの自動同期は行いません。</p>
+        <p className="international-small">日本酒の表とは別の「ChinaDrinks」に保存します。端末内からGoogleへの自動同期は行いません。保存が未確認の場合は同じ内容で再試行できます。</p>
       </form>
     </div>
    </>:section==='map'?<>
