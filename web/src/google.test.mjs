@@ -194,7 +194,12 @@ test('photo errors distinguish 401, 403, 404, network and invalid bytes without 
   }
   globalThis.fetch=async()=>{throw new TypeError('secret');};
   await assert.rejects(google.getPhotoBlob('secret','id'),/通信エラー/);
-  globalThis.fetch=async()=>new Response('<html>invalid</html>');
+  globalThis.fetch=async(input)=>{
+    const url=new URL(input);
+    if(url.searchParams.get('alt')==='media')return new Response('<html>invalid</html>');
+    return json({id:'id',mimeType:'image/png',parents:['test-photos'],
+      appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo'}});
+  };
   await assert.rejects(google.getPhotoBlob('secret','id'),/未対応/);
 });
 test('invalid file is rejected before any network mutation',async()=>{

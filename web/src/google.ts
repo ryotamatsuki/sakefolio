@@ -237,7 +237,7 @@ export async function uploadPhoto(token: string, folderId: string, file: File, i
  * A Sheet cell is untrusted even when read through the user's own OAuth token.
  */
 export async function getPhotoBlob(token: string, id: string, expectedFolderId?: string): Promise<Blob> {
-  if (!/^[\\w-]{8,200}$/.test(id))
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(id))
     throw new Error('写真IDが正しい形式ではありません。');
   const url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id);
   const meta=await api<{id?:string;mimeType?:string;parents?:string[];trashed?:boolean;
