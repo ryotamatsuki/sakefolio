@@ -19,6 +19,7 @@ import InternationalProducerMap from './InternationalProducerMap';
 import InternationalInsights from './InternationalInsights';
 import {INTERNATIONAL_SENSORY,splitDescriptorTags,toggleDescriptorTag} from './internationalSensory';
 import {createRequestGate} from './requestGate';
+import {volumeFromQuantity} from './internationalInput';
 
 const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
 interface Props {token:string;storage:StorageInfo|null;onConnect:()=>void}
@@ -64,6 +65,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [photo,setPhoto]=useState<File|null>(null);
  const [query,setQuery]=useState('');
  const [offQuery,setOffQuery]=useState('');
+ const [barcode,setBarcode]=useState('');
  const [wikiQuery,setWikiQuery]=useState('');
  const [wikiResults,setWikiResults]=useState<WikidataCandidate[]>([]);
  const [wikiState,setWikiState]=useState<'idle'|'loading'|'error'|'done'>('idle');
@@ -185,6 +187,41 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
      const json:unknown=await response.json();
      setOffResults(normalizeOffProducts(json));setOffState('done');
    }catch(e){setOffState('error');setError('Open Food Factsの検索に失敗しました。中国国内などからアクセスできない場合は手動入力してください。');}
+ };
+ const chooseOffProduct=(p:OffProduct)=>{
+   const ml=volumeFromQuantity(p.quantity);
+   setData(d=>({...d,brandName:p.brandName||d.brandName,productName:p.productName,sourceUrl:p.source,
+     attributes:{...d.attributes,...(ml?{volume:String(ml)}:{})}}));
+   setQuery(p.brandName||'');
+ };
+ const lookupBarcode=async(code:string)=>{
+   if(!/^\\d{8,14}$/.test(code)){setError('JAN/EANバーコードは8〜14桁の数字を入力してください。');return;}
+   setOffState('loading');setError('');
+   try{
+     const u='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
+       '.json?fields=code,product_name,brands,quantity';
+     const response=await fetch(u,{signal:AbortSignal.timeout(15000)});
+     if(!response.ok)throw Error('検索失敗');
+     const obj=await response.json() as {product?:unknown};
+     const normalized=normalizeOffProducts({products:obj.product?[obj.product]:[]});
+     if(!normalized.length){setError('このバーコードに対応する商品が見つかりません。手動検索も可能です。');setOffState('done');return;}
+     setOffResults(normalized);chooseOffProduct(normalized[0]);setOffState('done');
+     setStatus('バーコードの照合結果を入力しました。商品・産地・容量はラベルで確認してください。');
+   }catch{setError('バーコード検索に接続できませんでした。手入力を利用してください。');setOffState('error');}
+ };
+ const scanBarcode=async(file:File)=>{
+   const Detector=(window as unknown as {BarcodeDetector?:new(options:{formats:string[]})=>{detect:(img:ImageBitmap)=>Promise<{rawValue:string}[]>}}).BarcodeDetector;
+   if(!Detector){setError('このブラウザはバーコードの画像認識に対応していません。番号を手入力してください。');return;}
+   try{
+     const bitmap=await createImageBitmap(file);
+     let codes:{rawValue:string}[]=[];
+     try{codes=await new Detector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}).detect(bitmap);}
+     finally{bitmap.close();}
+     if(!codes.length){setError('バーコードを読み取れませんでした。正面から撮影するか番号を入力してください。');return;}
+     const code=codes.map(x=>x.rawValue).find(x=>/^\\d{8,14}$/.test(x));
+     if(!code){setError('対応するJAN/EANバーコードがありません。');return;}
+     setBarcode(code);await lookupBarcode(code);
+   }catch{setError('画像からバーコードを読み取れませんでした。番号を入力してください。');}
  };
  const beginEdit=(rec:InternationalRecord)=>{
    if(busy||pendingCloudSave.current){setError('未完了の保存を先に再試行してください。');return;}
@@ -355,6 +392,16 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           onClick={()=>pick(b.name,b.region)}>
           <strong>{b.name}</strong><span>{b.latin} · {b.region}</span><ArrowRight size={16}/></button>)}</div>
         {!filtered.length&&<p>候補がありません。実在する商品名を調べて手動で登録できます。</p>}
+        <h3>バーコードで商品を探す</h3>
+        <p>JAN/EAN番号からOpen Food Factsを検索します。画像読み取り対応ブラウザでは写真からバーコードを検出できます。画像は端末内で解析し、番号だけを検索先へ送信します。</p>
+        <label>バーコード番号（8〜14桁）<input type="text" inputMode="numeric" pattern="[0-9]{8,14}" maxLength={14}
+          value={barcode} onChange={e=>setBarcode(e.target.value.replace(/[^0-9]/g,''))} placeholder="例：4901234567894"/></label>
+        <div className="record-actions">
+          <button type="button" onClick={()=>void lookupBarcode(barcode)} disabled={offState==='loading'}>番号で商品を検索</button>
+          <label className="record-scan-label">バーコード写真
+            <input type="file" accept="image/*" capture="environment" onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void scanBarcode(f);}}/>
+          </label>
+        </div>
         <h3>Open Food Factsから商品を検索</h3>
         <p>利用者が検索ボタンを押したときだけ外部APIへ検索語を送信します。商品名・ブランド名・容量はユーザー登録の参考値です。商品区分の一致やラベル写真の利用権限は別途確認してください。</p>
         <label>商品名・ブランド名<input value={offQuery} onChange={e=>setOffQuery(e.target.value)}
@@ -363,10 +410,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
           {offState==='loading'?'検索中…':'Open Food Factsを検索'} <Search size={15}/></button>
         {offState==='done'&&!offResults.length&&<p role="status">一致する商品がありません。検索語を変えるか手動入力してください。</p>}
         {!!offResults.length&&<div className="international-hits">
-          {offResults.map(p=><button type="button" key={p.code} onClick={()=>{
-            setData(d=>({...d,brandName:p.brandName||d.brandName,productName:p.productName,sourceUrl:p.source}));
-            setQuery(p.brandName||'');
-          }}>
+          {offResults.map(p=><button type="button" key={p.code} onClick={()=>chooseOffProduct(p)}>
             <strong>{p.productName}</strong><span>{p.brandName||'ブランド未登録'} · {p.quantity} · EAN {p.code}</span><ArrowRight size={16}/></button>)}</div>}
         <p className="international-credits"><a href="https://world.openfoodfacts.org/" target="_blank" rel="noopener noreferrer">Open Food Facts</a> — ODbL / データ帰属。<a href="https://world.openfoodfacts.org/terms-of-use" target="_blank" rel="noopener noreferrer">再利用規約</a>。掲載データの正確性・網羅性は未保証。</p>
         <h3>Wikidataでブランド・メーカーを照合</h3>

@@ -12,6 +12,7 @@ import type { BreweryCoordinate } from './breweryMapModel';
 import BreweryMap from './BreweryMap';
 import TasteDashboard from './TasteDashboard';
 import InternationalDrinks from './InternationalDrinks';
+import Legal from './Legal';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
@@ -19,9 +20,10 @@ import { AROMA_GROUPS, POPULAR_AROMA_IDS, SENSORY_AXES, TASTE_GROUPS, selectedId
 import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage, updateReview } from './google';
 import {listTrash,moveToTrash,restoreFromTrash} from './trash';
 import type {TrashEntry} from './trash';
-import {downloadCsv,downloadJson,buildPreferenceSummary} from './recordArchive';
+import {downloadCsv,downloadJson,downloadBlob,buildPreferenceSummary} from './recordArchive';
+import {buildJapanBackup,readJapanBackup} from './japanBackup';
 
-type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights' | 'international';
+type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights' | 'international' | 'legal';
 function todayLocal(): string {
   const date = new Date();
   return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
@@ -231,6 +233,43 @@ export default function App() {
     const [saved,deleted]=await Promise.all([loadRecords(token,storage),listTrash(token,storage)]);
     if(session.current===current){setRecords(saved);setTrash(deleted);}
   };
+  const exportJapanesePhotos=async()=>{
+    if(!token||!storage||operation.current)return;
+    operation.current=true;setBusy(true);const current=session.current;
+    try{
+      const blob=await buildJapanBackup(visibleRecords,id=>getPhotoBlob(token,id,storage.photoFolderId));
+      if(current!==session.current)return;
+      downloadBlob('sakefolio-japan-with-photos-'+todayLocal()+'.json',blob);
+      setMessage('写真付き日本酒バックアップを書き出しました。個人情報を含むため安全に保管してください。');
+    }catch(e){if(current===session.current)setMessage(e instanceof Error?e.message:'バックアップを書き出せませんでした。');}
+    finally{operation.current=false;setBusy(false);}
+  };
+  const importJapanesePhotos=async(file:File)=>{
+    if(!token||!storage||operation.current)return;
+    operation.current=true;setBusy(true);const current=session.current;
+    try{
+      const items=await readJapanBackup(file);
+      if(current!==session.current)return;
+      if(!window.confirm(items.length+'件の日本酒記録と写真をGoogle Driveに復元します。既に復元したIDはスキップしますが、初回は新たな記録になります。続行しますか？'))return;
+      const existing=await loadRecords(token,storage);
+      const ids=new Set(existing.map(r=>r.reviewId));
+      let added=0,skipped=0;
+      for(const item of items){
+        if(current!==session.current)return;
+        const id='restored-'+item.record.reviewId;
+        if(ids.has(id)){skipped++;continue;}
+        const source={...item.record,reviewId:'',brandId:'',photoId:'',createdAt:''};
+        const safe=item.photo?await createPhotoPreview(item.photo):null;
+        await saveRecord(token,storage,source,brands,
+          safe?new File([safe],'restored-label.png',{type:'image/png'}):null,
+          {reviewId:id,startedAt:item.record.createdAt});
+        ids.add(id);added++;
+      }
+      await reloadCollection(current);
+      if(current===session.current)setMessage('復元完了：'+added+'件追加、'+skipped+'件スキップ。記録と写真を確認してください。');
+    }catch(e){if(current===session.current)setMessage((e instanceof Error?e.message:'復元できませんでした。')+' 途中まで保存された場合は同じファイルを再選択してください。');}
+    finally{operation.current=false;setBusy(false);}
+  };
   const beginEdit=(r:RecordEntry)=>{
     if(pendingSave.current){setMessage('未完了の保存を先に再確認してください。');return;}
     setEditingRecord(r);setEntry({...emptyEntry(),...r});setSelectedPhoto(null);setPhoto(null);
@@ -366,7 +405,11 @@ export default function App() {
           </div>
           {token&&<div className="record-actions">
             <button type="button" onClick={()=>downloadCsv('sakefolio-japan.csv',visibleRecords)}>日本酒CSVを書出す</button>
-            <button type="button" onClick={()=>downloadJson('sakefolio-japan.json',{format:'sakefolio-japan-v1',records:visibleRecords})}>日本酒JSONを書出す</button>
+            <button type="button" onClick={()=>downloadJson('sakefolio-japan-text-only.json',{format:'sakefolio-japan-text-v1',records:visibleRecords})}>JSON（写真IDのみ）</button>
+            <button type="button" disabled={busy} onClick={()=>void exportJapanesePhotos()}>写真付き日本酒バックアップ</button>
+            <label className="record-scan-label">日本酒バックアップの復元
+              <input type="file" accept=".json,application/json" disabled={busy} onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void importJapanesePhotos(f);}}/>
+            </label>
           </div>}
           <div className="subheading-row"><h3>最近の記録</h3><span>{records.length ? 'NEWEST FIRST' : 'YOUR COLLECTION STARTS HERE'}</span></div>
           {visibleRecords.length ? <div className="records-grid">{visibleRecords.map(r => <article className="record-card" key={r.reviewId}>
@@ -660,6 +703,7 @@ export default function App() {
         </form>
       </section>}
 
+      {tab==='legal' && <Legal/>}
       {tab==='international' && <InternationalDrinks key={storage?.spreadsheetId||'local'} token={token} storage={storage} onConnect={connect}/>}
       {tab==='insights' && <TasteDashboard records={visibleRecords} loggedIn={!!token}
         renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
@@ -686,6 +730,7 @@ export default function App() {
       <div className="footer-inner">
         <div className="footer-brand"><span className="logo-text">Sakefolio<span className="logo-dot">.</span></span><p>一杯を、忘れない。</p></div>
         <div className="footer-right"><span><ShieldCheck size={15}/> 日本酒はGoogle Drive、中国酒は端末内保存</span>
+          <button type="button" className="text-action" onClick={()=>goto('legal')}>プライバシー・利用案内</button>
           <a href="https://sakenowa.com" target="_blank" rel="noopener noreferrer">銘柄データ提供：さけのわ <ExternalLink size={12}/></a></div>
       </div>
     </footer>

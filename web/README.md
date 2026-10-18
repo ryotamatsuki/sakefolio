@@ -148,3 +148,18 @@ Sakefolio フォルダ内にSakefolio_DataというGoogleスプレッドシー�
 - Sheetsの`ChinaDrinks.attributesJson`のJSONキー`volume`、`abv`は従来通りで、列追加・旧データ書き換えなし。新規データは数値表記を正規化して保存します。旧データについても数値に変換できるものは集計時に正規化し、変換できないものは集計分母から除外します。
 - 中国酒の酒類別嗜好分析に、容量別件数・度数別件数・平均度数・最頻容量を追加。集計単位は**登録件数ベース**（同一SKUを繰り返し記録した場合は重複カウント）であり、固有商品の市場構成を示すものではありません。UXTESTの仮評価は引き続き本人の嗜好と区別します。
 - 主な回帰条件：`33cl→330mL`、`0.75L→750mL`、`6×330ml→自動入力なし`、ABV`5.0→5`、`5.55→入力拒否`、容量`330.5→入力拒否`。入力制限はUIだけでなく`validateInternationalRecord`でも必須とします。
+
+## Daily-use management (development branch only)
+
+Daily-use features are developed separately from the Google OAuth security audit:
+- Japanese Reviews can be edited in-place after optimistic verification of the current Sheets row. The immutable Bottles snapshot represents the originally recorded product; edited Reviews fields are the display and analysis source.
+- Chinese ChinaDrinks supports optimistic in-place editing, new label photo replacements, and local IndexedDB editing.
+- Both collections can be moved to a reversible Trash. In Google-connected mode, SakefolioTrash contains tombstone IDs; original spreadsheet rows and photos remain intact. Local Chinese items retain a trashedAt flag. **Trash is not permanent erasure**; no background deletion is done.
+- Repeat tasting creates a *new* event and does not replace prior ratings.
+- Japanese CSV and text-only JSON downloads, Chinese CSV, and Chinese photo-inclusive JSON backups are available. Japanese photo-inclusive JSON backups and bounded (250 records, 80MB) restorations are available in development only. A backup file can contain personal data and label photos: store it safely. Japanese imports use prefixed IDs to avoid overwriting the source row. Failed multi-record imports may partially complete and can be retried; no global transaction is promised.
+- CSV export neutralises formula-like strings to reduce spreadsheet-injection risk. Do not treat CSV as a lossless photo backup.
+- China barcode lookup uses Open Food Facts. Where BarcodeDetector is supported, barcode images are decoded locally; only the number is sent to the third-party catalog after a user action. Text/OCR label recognition is not implemented.
+- Privacy/usage disclosures describe actual data locations, external lookups, app-owner limitations, and the fact that existing photos are not retroactively stripped of EXIF.
+- No real iPhone Safari, external account separation, or Google Cloud OAuth configuration validation is implied by an automated build. The security release gate remains **NO GO** for inviting general users.
+
+The isolated feature branch is for review and testing only. Its GitHub Actions workflow performs tests, dependency audit, build and CodeQL without deploying to GitHub Pages. Do not merge into main or the live preview until the security-gate PR is independently verified.
