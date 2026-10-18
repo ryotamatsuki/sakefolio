@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 6542)
+Total output lines: 408
+
 import type { Brand, RecordEntry, RevocationResponse, StorageInfo, TokenResponse } from './types';
 import { detectPhotoType, validateRecordInput, verifyPhoto } from './security';
 
@@ -7,6 +10,11 @@ import { detectPhotoType, validateRecordInput, verifyPhoto } from './security';
  */
 export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+// A local/live audit build can use a separately named Drive area and marker.
+// The opt-in is an exact date token so normal builds retain their existing namespace.
+const SECURITY_TEST_MODE = import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019';
+const STORAGE_FOLDER_NAME = SECURITY_TEST_MODE ? 'SAKEFOLIO_SECURITY_TEST_20261019' : 'Sakefolio';
+const STORAGE_SHEET_NAME = SECURITY_TEST_MODE ? 'SAKEFOLIO_SECURITY_TEST_20261019_Data' : 'Sakefolio_Data';
 
 const TABLE_HEADERS: Record<string, string[]> = {
   Brands: ['brandId','brandName','breweryName','prefecture','breweryId','areaId','source','sakenowaBrandId','createdAt','updatedAt','municipality','breweryAddress'],
@@ -75,7 +83,7 @@ export function revokeAccess(token: string): Promise<RevocationResponse> {
     catch { finish({successful:false,error:'unavailable'}); }
   });
 }
-const APP_MARKER = 'sakefolio-react-v1';
+const APP_MARKER = SECURITY_TEST_MODE ? 'sakefolio-security-test-20261019-v1' : 'sakefolio-react-v1';
 type FileKind = 'root' | 'photos-folder' | 'spreadsheet' | 'photo';
 const metadata = (kind: FileKind) => ({appProperties: {sakefolioApp: APP_MARKER, sakefolioKind:kind}});
 interface DriveFile { id: string; name?: string; mimeType?: string }
@@ -137,117 +145,13 @@ async function initializeSpreadsheet(token: string, id: string): Promise<void> {
 export async function ensureStorage(token: string): Promise<StorageInfo> {
   const folderMime = 'application/vnd.google-apps.folder';
   const sheetMime = 'application/vnd.google-apps.spreadsheet';
-  let folder = await findFile(token, 'Sakefolio', '', folderMime, 'root');
-  if (!folder) folder = await createFile(token,{name:'Sakefolio',mimeType:folderMime,...metadata('root')});
+  let folder = await findFile(token, STORAGE_FOLDER_NAME, '', folderMime, 'root');
+  if (!folder) folder = await createFile(token,{name:STORAGE_FOLDER_NAME,mimeType:folderMime,...metadata('root')});
   let photos = await findFile(token,'Photos',folder.id,folderMime,'photos-folder');
   if (!photos) photos = await createFile(token,{name:'Photos',mimeType:folderMime,parents:[folder.id],...metadata('photos-folder')});
-  let spreadsheet = await findFile(token,'Sakefolio_Data',folder.id,sheetMime,'spreadsheet');
-  if (!spreadsheet) spreadsheet = await createFile(token,{name:'Sakefolio_Data',mimeType:sheetMime,parents:[folder.id],...metadata('spreadsheet')});
-  // Validate known schema. Only initialize an empty/partially created app-owned workbook;
-  // never rewrite the headings of a populated workbook.
-  const structure = await api<{sheets:{properties:{sheetId:number,title:string}}[]}>(token,
-    'https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheet.id+'?fields=sheets(properties(sheetId,title))');
-  const allTitles = new Set(structure.sheets.map(item => item.properties.title));
-  let needsSetup = Object.keys(TABLE_HEADERS).some(table=>!allTitles.has(table));
-  if (!needsSetup) {
-    for (const [table, expected] of Object.entries(TABLE_HEADERS)) {
-      const cells = await getRows(token,spreadsheet.id,table,'A1:AZ1');
-      const current = cells[0] || [];
-      if (current.length === 0) { needsSetup = true; continue; }
-      if (expected.some((name,index) => current[index] !== name))
-        throw new Error('保存先の「'+table+'」の列構造が変わっています。データ保護のため書き込みを中止しました。');
-    }
-  }
-  if (needsSetup) {
-    // Guard every populated sheet before filling missing tabs/headers.
-    for (const [table,expected] of Object.entries(TABLE_HEADERS)) {
-      if (!allTitles.has(table)) continue;
-      const current = (await getRows(token,spreadsheet.id,table,'A1:AZ1'))[0] || [];
-      if (current.length && expected.some((name,index)=>current[index]!==name))
-        throw new Error('保存先の「'+table+'」が予期しない形式のため初期化を中止しました。');
-    }
-    await initializeSpreadsheet(token,spreadsheet.id);
-  }
-  return {folderId:folder.id,photoFolderId:photos.id,spreadsheetId:spreadsheet.id};
-}
-async function getRows(token: string, id: string, table: string, range?: string): Promise<string[][]> {
-  const encoded = encodeURIComponent("'" + table + "'!" + (range || 'A1:AZ'));
-  const value = await api<{values?: string[][]}>(token,
-    'https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + encoded);
-  return value.values || [];
-}
-async function appendRow(token: string, id: string, table: string, fields: Record<string,string>): Promise<void> {
-  const header = TABLE_HEADERS[table];
-  if (!header) throw new Error('不明な保存先テーブル: ' + table);
-  await api(token,'https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' +
-    encodeURIComponent("'" + table + "'!A:AZ") +
-    ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', {
-      method:'POST',body:JSON.stringify({values:[header.map(key => fields[key] || '')]})
-    });
-}
-export async function loadRecords(token: string, storage: StorageInfo): Promise<RecordEntry[]> {
-  const rows = await getRows(token,storage.spreadsheetId,'Reviews');
-  if (!rows.length) return [];
-  const headers = rows[0];
-  const records = rows.slice(1).filter(row => row[0]);
-  return records.map(row => ({
-    ...(Object.fromEntries(TABLE_HEADERS.Reviews.map(field => [field, String(row[headers.indexOf(field)] || '')])) as unknown as RecordEntry),
-    notes: String(row[headers.indexOf('comment')] || '')
-  })).sort((a,b) => b.drinkingDate.localeCompare(a.drinkingDate));
-}
-export async function loadManualBrands(token: string, storage: StorageInfo): Promise<Brand[]> {
-  const rows = await getRows(token,storage.spreadsheetId,'Brands','A1:L');
-  if (!rows.length) return [];
-  const headers = rows[0];
-  return rows.slice(1).filter(r => r.length && r[0]).map(row => ({
-    brandId: String(row[headers.indexOf('brandId')] || ''),
-    brandName: String(row[headers.indexOf('brandName')] || ''),
-    breweryName: String(row[headers.indexOf('breweryName')] || ''),
-    prefecture: String(row[headers.indexOf('prefecture')] || ''),
-    municipality: String(row[headers.indexOf('municipality')] || ''),
-    breweryAddress: String(row[headers.indexOf('breweryAddress')] || '')
-  }));
-}
-export async function uploadPhoto(token: string, folderId: string, file: File, id?: string, reviewId?: string): Promise<string> {
-  const verified = await verifyPhoto(file);
-  const boundary = 'sakefolio_' + crypto.randomUUID().replace(/-/g,'');
-  // Generated name and content type derive from verified magic bytes, not user input.
-  const name = crypto.randomUUID() + '.' + verified.extension;
-  const photoMetadata = {id,name,parents:[folderId],description:'Sakefolio private label photo',
-    appProperties:{...metadata('photo').appProperties,...(reviewId ? {reviewId} : {})}};
-  const delimiter = '\r\n--' + boundary + '\r\n';
-  const body = new Blob([
-    '--' + boundary + '\r\n',
-    'Content-Type: application/json; charset=UTF-8\r\n\r\n',
-    JSON.stringify(photoMetadata),
-    delimiter,
-    'Content-Type: ' + verified.mime + '\r\n\r\n',
-    file,
-    '\r\n--' + boundary + '--'
-  ]);
-  const result = await api<{id:string}>(token,
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
-      method:'POST', headers: {'Content-Type':'multipart/related; boundary=' + boundary}, body
-    });
-  if (!result.id) throw new Error('写真保存後のファイルIDを取得できませんでした。');
-  return result.id;
-}
-/** Refuse IDs from spreadsheet text unless they still designate an app-owned
- * photo in the current Sakefolio photo folder. Never download arbitrary Drive files.
- * A Sheet cell is untrusted even when read through the user's own OAuth token.
- */
-export async function getPhotoBlob(token: string, id: string, expectedFolderId?: string): Promise<Blob> {
-  if (!/^[A-Za-z0-9_-]{1,200}$/.test(id))
-    throw new Error('写真IDが正しい形式ではありません。');
-  const url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id);
-  const meta=await api<{id?:string;mimeType?:string;parents?:string[];trashed?:boolean;
-    appProperties?:Record<string,string>}>(token,url+'?fields=id,mimeType,parents,trashed,appProperties');
-  if (meta.id!==id||meta.trashed===true||
-    meta.appProperties?.sakefolioApp!==APP_MARKER||meta.appProperties?.sakefolioKind!=='photo'||
-    (expectedFolderId&&!meta.parents?.includes(expectedFolderId)))
-    throw new Error('指定されたファイルはSakefolioが管理する写真ではありません。');
-  // The app never creates active-content MIME types.
-  if (!meta.mimeType||!['image/jpeg','image/png','image/webp','image/heic','image/heif','image/avif'].includes(meta.mimeType))
+  let spreadsheet = await findFile(token,STORAGE_SHEET_NAME,folder.id,sheetMime,'spreadsheet');
+  if (!spreadsheet) spreadsheet = await createFile(token,{name:STORAGE_SHEET_NAME,mimeType:sheetMime,parents:[folder.id],...metadata('spreadsheet')});
+  // Validate known schema. Only initial…1542 tokens truncated…  if (!meta.mimeType||!['image/jpeg','image/png','image/webp','image/heic','image/heif','image/avif'].includes(meta.mimeType))
     throw new Error('写真のMIMEタイプが許可されていません。');
   const response=await fetch(url+'?alt=media',{
     signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}
