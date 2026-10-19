@@ -4,7 +4,7 @@
 import type {StorageInfo} from './types';
 import type {InternationalRecord} from './internationalLocal';
 import {validateInternationalRecord} from './internationalLocal.ts';
-import {uploadPhoto,getPhotoBlob} from './google.ts';
+import {APP_MARKER,uploadPhoto,getPhotoBlob} from './google.ts';
 import {sanitizePhotoForStorage} from './photos.ts';
 
 export const CHINA_TABLE='ChinaDrinks';
@@ -134,7 +134,7 @@ export async function saveChinaCloud(token:string,storage:StorageInfo,record:Int
        if(!check.ok)throw Error('写真確認に失敗しました（HTTP '+check.status+'）。');
        const found=await check.json() as {parents?:string[];appProperties?:Record<string,string>};
        if(!found.parents?.includes(storage.photoFolderId)||
-          found.appProperties?.sakefolioApp!=='sakefolio-react-v1'||
+          found.appProperties?.sakefolioApp!==APP_MARKER||
           found.appProperties?.sakefolioKind!=='photo'||
           found.appProperties?.reviewId!==record.id)
          throw Error('写真の保存先または記録IDが一致しません。');
