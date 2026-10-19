@@ -79,7 +79,7 @@ export function revokeAccess(token: string): Promise<RevocationResponse> {
     catch { finish({successful:false,error:'unavailable'}); }
   });
 }
-const APP_MARKER = SECURITY_TEST_MODE ? 'sakefolio-security-test-20261019-v1' : 'sakefolio-react-v1';
+export const APP_MARKER = SECURITY_TEST_MODE ? 'sakefolio-security-test-20261019-v1' : 'sakefolio-react-v1';
 type FileKind = 'root' | 'photos-folder' | 'spreadsheet' | 'photo';
 const metadata = (kind: FileKind) => ({appProperties: {sakefolioApp: APP_MARKER, sakefolioKind:kind}});
 interface DriveFile { id: string; name?: string; mimeType?: string }
