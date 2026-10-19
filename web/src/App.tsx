@@ -12,6 +12,7 @@ import type { BreweryCoordinate } from './breweryMapModel';
 import BreweryMap from './BreweryMap';
 import TasteDashboard from './TasteDashboard';
 import InternationalDrinks from './InternationalDrinks';
+import type {ChinaPendingSave} from './InternationalDrinks';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
@@ -38,16 +39,17 @@ function Photo({ token, photoId, folderId, alt }: { token: string; photoId: stri
   const [retry,setRetry] = useState(0);
   useEffect(() => {
     let active = true;
+    const controller=new AbortController();
     let objectUrl = '';
     setUrl('');setError('');
     if (token && photoId) {
-      getPhotoBlob(token, photoId, folderId).then(blob => {
+      getPhotoBlob(token, photoId, folderId, controller.signal).then(blob => {
         objectUrl = URL.createObjectURL(blob);
         if (active) setUrl(objectUrl);
         else URL.revokeObjectURL(objectUrl);
       }).catch(error => { if (active) setError(error instanceof Error ? error.message : '写真の通信エラー。'); });
     }
-    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    return () => { active = false; controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [token, photoId,folderId,retry]);
   return url ? <img className="record-photo" src={url} alt={alt} loading="lazy" onError={()=>{setUrl('');setError('画像形式を展開できません。JPEG・PNGで再登録してください。');}} /> : <div className="photo-fallback"><Wine size={30} strokeWidth={1.3}/>{error && <div role="alert">{error}<button type="button" onClick={()=>setRetry(v=>v+1)}>写真を再取得</button></div>}</div>;
 }
@@ -75,6 +77,8 @@ export default function App() {
   const [photoBusy,setPhotoBusy] = useState(false);
   const [photoError,setPhotoError] = useState('');
   const pendingSave = useRef<{entry:RecordEntry;photo:File|null;attempt:SaveAttempt;email:string} | null>(null);
+  // Keep uncertain China saves in memory across page changes and token renewal.
+  const pendingChinaSave = useRef<ChinaPendingSave|null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showAllAromas, setShowAllAromas] = useState(false);
   const [aromaSearch, setAromaSearch] = useState('');
@@ -129,7 +133,8 @@ export default function App() {
     try {
       const accessToken = await requestGoogleAccess();
       const account = await getDriveAccount(accessToken);
-      if (pendingSave.current && pendingSave.current.email !== account.emailAddress) {
+      if ((pendingSave.current && pendingSave.current.email !== account.emailAddress) ||
+          (pendingChinaSave.current && pendingChinaSave.current.email !== account.emailAddress)) {
         setMessage('未完了の保存があります。同じGoogleアカウントで再接続してください。');return;
       }
       if (previousEmail && previousEmail !== account.emailAddress) {setEntry(emptyEntry());setSelectedPhoto(null);}
@@ -140,7 +145,7 @@ export default function App() {
       if (session.current !== current) return;
       setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);
       setAccountEmail(account.emailAddress);
-      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
+      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current||pendingChinaSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
     } catch (error) {
       if (session.current !== current) return;
       setMessage(error instanceof Error ? error.message : '接続に失敗しました。');
@@ -601,7 +606,7 @@ export default function App() {
         </form>
       </section>}
 
-      {tab==='international' && <InternationalDrinks key={storage?.spreadsheetId||'local'} token={token} storage={storage} onConnect={connect}/>}
+      {tab==='international' && <InternationalDrinks key={storage?.spreadsheetId||'local'} token={token} storage={storage} accountEmail={accountEmail} pendingCloudSave={pendingChinaSave} onConnect={connect}/>}
       {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
         renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}

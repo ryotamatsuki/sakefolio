@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
-import type {ChangeEvent,FormEvent} from 'react';
+import type {ChangeEvent,FormEvent,MutableRefObject} from 'react';
 import {ArrowRight,BookOpen,Camera,Download,ExternalLink,Info,MapPin,Search,ShieldCheck,Upload,Wine,X} from 'lucide-react';
 import {BRAND_STARTERS,KIND_CONFIG,KIND_NAME,brandMatches,normalizeOffProducts,normalizeWikidataResults} from './internationalCatalog';
 import type {BeverageKind,OffProduct,WikidataCandidate} from './internationalCatalog';
@@ -18,7 +18,8 @@ import {INTERNATIONAL_SENSORY,splitDescriptorTags,toggleDescriptorTag} from './i
 import {createRequestGate} from './requestGate';
 
 const today=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
-interface Props {token:string;storage:StorageInfo|null;onConnect:()=>void}
+export interface ChinaPendingSave {email:string;spreadsheetId:string;record:InternationalRecord;photo:File|null}
+interface Props {token:string;storage:StorageInfo|null;accountEmail:string;pendingCloudSave:MutableRefObject<ChinaPendingSave|null>;onConnect:()=>void}
 const initial=(kind:BeverageKind)=>({
   kind,brandName:'',productName:'',producer:'',region:'',sourceUrl:'',attributes:{} as Record<string,string>,
   experience:'catalogued' as 'catalogued'|'tasted'|'test',tastedAt:'',rating:'',aroma:'',taste:'',notes:''
@@ -27,17 +28,18 @@ function PhotoPreview({blob,photoId,token,folderId,alt}:{blob:Blob|null;photoId?
  const [url,setUrl]=useState(''),[error,setError]=useState(false);
  useEffect(()=>{
   let alive=true,current='';
+  const controller=new AbortController();
   setUrl('');setError(false);
   const task=async()=>{
    try{
-    const data=blob||(photoId&&token?await getPhotoBlob(token,photoId,folderId):null);
+    const data=blob||(photoId&&token?await getPhotoBlob(token,photoId,folderId,controller.signal):null);
     if(!data)return;
     current=URL.createObjectURL(data);
     if(alive)setUrl(current);else URL.revokeObjectURL(current);
    }catch{if(alive)setError(true);}
   };
   void task();
-  return()=>{alive=false;if(current)URL.revokeObjectURL(current);};
+  return()=>{alive=false;controller.abort();if(current)URL.revokeObjectURL(current);};
  },[blob,photoId,token,folderId]);
  return url?<img src={url} alt={alt} loading="lazy"/>:
    error?<span role="alert">写真を取得できません</span>:<Wine size={25}/>;
@@ -48,9 +50,14 @@ const avg=(r:InternationalRecord[])=>{
 };
 const urlForOff=(q:string)=>'https://world.openfoodfacts.org/cgi/search.pl?search_terms='+
   encodeURIComponent(q)+'&search_simple=1&action=process&json=1&page_size=15&fields=code,product_name,brands,quantity';
-export default function InternationalDrinks({token,storage,onConnect}:Props){
- const [kind,setKind]=useState<BeverageKind>('baijiu');
- const [data,setData]=useState(initial('baijiu'));
+export default function InternationalDrinks({token,storage,accountEmail,pendingCloudSave,onConnect}:Props){
+ const pending=pendingCloudSave.current;
+ const resume=token&&storage&&pending?.spreadsheetId===storage.spreadsheetId&&pending.email===accountEmail?pending:null;
+ const [kind,setKind]=useState<BeverageKind>(resume?.record.kind||'baijiu');
+ const [data,setData]=useState(()=>resume?{
+   ...initial(resume.record.kind),...resume.record,
+   notes:resume.record.notes.replace(/^【UXTEST・本人未試飲】/,'')
+ }:initial('baijiu'));
  const [records,setRecords]=useState<InternationalRecord[]>([]);
  const [localCount,setLocalCount]=useState(0);
  const [cloudLoading,setCloudLoading]=useState(false);
@@ -58,7 +65,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [osmMaster,setOsmMaster]=useState<ChinaOsmSnapshot>(EMPTY_CHINA_OSM);
  const [masterStatus,setMasterStatus]=useState<'loading'|'loaded'|'unavailable'>('loading');
  const [osmStatus,setOsmStatus]=useState<'loading'|'loaded'|'unavailable'>('loading');
- const [photo,setPhoto]=useState<File|null>(null);
+ const [photo,setPhoto]=useState<File|null>(resume?.photo||null);
  const [query,setQuery]=useState('');
  const [offQuery,setOffQuery]=useState('');
  const [wikiQuery,setWikiQuery]=useState('');
@@ -71,8 +78,8 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [error,setError]=useState('');
  const [ready,setReady]=useState(false);
  const [selected,setSelected]=useState<string>('');
- const [pendingCloudSheet,setPendingCloudSheet]=useState('');
- const pendingCloudSave=useRef<{spreadsheetId:string;record:InternationalRecord;photo:File|null}|null>(null);
+ const [pendingCloudSheet,setPendingCloudSheet]=useState(resume?.spreadsheetId||'');
+ const requests=useRef(new AbortController());
  const loadGate=useRef(createRequestGate());
  const backupGate=useRef(createRequestGate());
  const [filter,setFilter]=useState<BeverageKind|'all'>('all');
@@ -84,25 +91,27 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const masterMatches=useMemo(()=>chinaMasterSearch(master.rows,kind,query,30),[master.rows,kind,query]);
  const own=useMemo(()=>records.filter(r=>filter==='all'||r.kind===filter),[records,filter]);
  const chosen=records.find(x=>x.id===selected);
- const load=async(isCurrent:()=>boolean=()=>true)=>{
+ const load=async(signal:AbortSignal=requests.current.signal,isCurrent:()=>boolean=()=>!signal.aborted)=>{
+   if(signal.aborted)return;
    setCloudLoading(Boolean(token&&storage));
    try{
      const local=await listInternationalRecords();
-     if(!isCurrent())return;
+     if(!isCurrent()||signal.aborted)return;
      setLocalCount(local.length);
-     const actual=token&&storage?await loadChinaCloud(token,storage):local;
-     if(!isCurrent())return;
+     const actual=token&&storage?await loadChinaCloud(token,storage,signal):local;
+     if(!isCurrent()||signal.aborted)return;
      setRecords(actual);setReady(true);setError('');
-   }catch(e){if(isCurrent()){setReady(false);setError(e instanceof Error?e.message:'記録を読み込めません。');}}
-   finally{if(isCurrent())setCloudLoading(false);}
+   }catch(e){if(isCurrent()&&!signal.aborted){setReady(false);setError(e instanceof Error?e.message:'記録を読み込めません。');}}
+   finally{if(isCurrent()&&!signal.aborted)setCloudLoading(false);}
  };
  useEffect(()=>{
    let active=true;
+   const controller=new AbortController();requests.current=controller;
    const current=loadGate.current.begin();
    const isCurrent=()=>active&&current();
-   setRecords([]);setReady(false);setSelected('');
-   void load(isCurrent);
-   return()=>{active=false;loadGate.current.invalidate();backupGate.current.invalidate();};
+   setRecords([]);setReady(false);setSelected('');setBusy(false);
+   void load(controller.signal,isCurrent);
+   return()=>{active=false;controller.abort();loadGate.current.invalidate();backupGate.current.invalidate();};
  },[token,storage?.spreadsheetId]);
  useEffect(()=>{
    let active=true;
@@ -173,6 +182,8 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  };
  const save=async(e:FormEvent)=>{
    e.preventDefault();if(busy||!ready)return;
+   const signal=requests.current.signal;
+   if(signal.aborted)return;
    setBusy(true);setStatus('');setError('');
    let record:InternationalRecord={
      id:crypto.randomUUID(),kind,brandName:data.brandName.trim(),productName:data.productName.trim(),
@@ -187,31 +198,37 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
    let photoToSave=photo;
    if(token&&storage){
      const pending=pendingCloudSave.current;
-     if(pending&&pending.spreadsheetId===storage.spreadsheetId){
+     if(pending&&pending.spreadsheetId===storage.spreadsheetId&&pending.email===accountEmail){
        record=pending.record;photoToSave=pending.photo;
      }else{
-       pendingCloudSave.current={spreadsheetId:storage.spreadsheetId,record,photo};
+       if(pending){setBusy(false);setError('未完了の記録と同じGoogleアカウント・保存先で再接続してください。');return;}
+       pendingCloudSave.current={email:accountEmail,spreadsheetId:storage.spreadsheetId,record,photo};
        setPendingCloudSheet(storage.spreadsheetId);
      }
    }
    try{
      if(token&&storage){
-       await saveChinaCloud(token,storage,record,photoToSave);
-       if(pendingCloudSave.current?.spreadsheetId===storage.spreadsheetId){pendingCloudSave.current=null;setPendingCloudSheet('');}
+       await saveChinaCloud(token,storage,record,photoToSave,signal);
+       if(signal.aborted)return;
+       if(pendingCloudSave.current?.record===record){pendingCloudSave.current=null;setPendingCloudSheet('');}
      }else await saveInternationalRecord(record,photo);
-     await load();setData(initial(kind));setPhoto(null);setQuery('');setOffResults([]);setOffState('idle');
+     if(signal.aborted)return;
+     await load(signal);
+     if(signal.aborted)return;
+     setData(initial(kind));setPhoto(null);setQuery('');setOffResults([]);setOffState('idle');
      setSection('collection');
      setStatus(token&&storage?'Google Sheetsに保存し、読み戻して確認しました。':'端末内に保存しました。Google Driveには同期していません。');
-   }catch(x){setError(x instanceof Error?x.message:'保存できませんでした。');}
-   finally{setBusy(false);}
+   }catch(x){if(!signal.aborted)setError(x instanceof Error?x.message:'保存できませんでした。');}
+   finally{if(!signal.aborted)setBusy(false);}
  };
  const backup=async()=>{
    // Account changes, unmounts and newer export attempts invalidate this export.
    const isCurrent=backupGate.current.begin();
+   const signal=requests.current.signal;
    setError('');setStatus('');
    try{
      const complete=await Promise.all(records.map(async r=>({...r,
-       photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId,storage?.photoFolderId):null)})));
+       photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId,storage?.photoFolderId,signal):null)})));
      if(!isCurrent())return;
      const blob=await buildBackup(complete);
      if(!isCurrent())return;
@@ -224,13 +241,17 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const restore=async(e:ChangeEvent<HTMLInputElement>)=>{
    const file=e.target.files?.[0];e.target.value='';if(!file)return;
    if(!window.confirm('バックアップを読み込みます。既存IDは上書きせず、重複を追加しません。続行しますか？'))return;
+   const signal=requests.current.signal;
    setBusy(true);setError('');setStatus('');
    try{
-     const outcome=await restoreBackup(file);await load();
+     const outcome=await restoreBackup(file);
+     if(signal.aborted)return;
+     await load(signal);
+     if(signal.aborted)return;
      setStatus('端末内へ復元しました：新規'+outcome.added+'件、既存重複'+outcome.duplicates+'件。Google Driveへは自動移行しません。');
      setSection('collection');
-   }catch(x){await load();setError(x instanceof Error?x.message:'復元できませんでした。');}
-   finally{setBusy(false);}
+   }catch(x){if(!signal.aborted){await load(signal);if(!signal.aborted)setError(x instanceof Error?x.message:'復元できませんでした。');}}
+   finally{if(!signal.aborted)setBusy(false);}
  };
  return <section className="page-section international-page">
    <div className="interior-head"><span className="taste-eyebrow">SAKEFOLIO · CHINA / INTERNATIONAL LAB</span>
