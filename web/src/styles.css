@@ -823,3 +823,5 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 .international-spec-cards small{font-size:11px;color:#749078}
 .international-spec-cards span{font-size:10px;color:#859c87}
 @media(max-width:650px){.international-spec-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* Visible only in the opt-in security sandbox build. */
+.security-sandbox-banner { padding: 12px 20px; background: #fff3cd; color: #5b4100; border-bottom: 2px solid #ad7900; display: grid; gap: 4px; font-size: 14px; }

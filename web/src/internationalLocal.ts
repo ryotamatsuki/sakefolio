@@ -4,7 +4,8 @@ import {validateTechnicalSpecs} from './internationalInput.ts';
 import {sanitizePhotoForStorage} from './photos.ts';
 import type {BeverageKind} from './internationalCatalog.ts';
 
-const DB='sakefolio-international-local-v1';
+import {LOCAL_DATABASE_NAME} from './deploymentMode.ts';
+const DB=LOCAL_DATABASE_NAME;
 const STORE='drinks';
 export const MAX_LOCAL_PHOTO_BYTES=10*1024*1024;
 const MAX_TEXT=4000,MAX_IMPORT_BYTES=80*1024*1024;

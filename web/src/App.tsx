@@ -12,6 +12,7 @@ import type { BreweryCoordinate } from './breweryMapModel';
 import BreweryMap from './BreweryMap';
 import TasteDashboard from './TasteDashboard';
 import InternationalDrinks from './InternationalDrinks';
+import {SECURITY_SANDBOX} from './deploymentMode';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
@@ -244,6 +245,11 @@ export default function App() {
   },[]);
 
   return <div className="app-shell">
+    {SECURITY_SANDBOX && <aside className="security-sandbox-banner" role="note">
+      <strong>セキュリティ検証専用 · 20261019</strong>
+      <span>保存先：SAKEFOLIO_SECURITY_TEST_20261019 ／ テスト記録・テスト写真のみ使用してください。</span>
+      <small>通常版とはDrive・端末内の保存先を分離。同一オリジンのためセキュリティ境界の分離ではありません。</small>
+    </aside>}
     <header className="site-header">
       <div className="header-inner">
         <button type="button" className="brand-lockup" onClick={() => goto('home')} aria-label="ホームへ戻る">

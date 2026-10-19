@@ -6,6 +6,22 @@ import ts from 'typescript';
 const securityUrl=new URL('./security.ts',import.meta.url).href;
 const source=readFileSync(new URL('./google.ts',import.meta.url),'utf8');
 const realFetch=globalThis.fetch;
+test('sandbox local database cannot select the normal database',async()=>{
+ const modeSource=readFileSync(new URL('./deploymentMode.ts',import.meta.url),'utf8');
+ const names=[];
+ for(const mode of [false,true]) {
+  const js=ts.transpileModule(modeSource.replace("import.meta.env?.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",String(mode)),{
+   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}
+  }).outputText;
+  const config=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+  names.push(config.LOCAL_DATABASE_NAME);
+ }
+ assert.equal(names[0],'sakefolio-international-local-v1');
+ assert.notEqual(names[0],names[1]);
+ assert.match(names[1],/security-test-20261019/);
+ const localSource=readFileSync(new URL('./internationalLocal.ts',import.meta.url),'utf8');
+ assert.match(localSource,/const DB=LOCAL_DATABASE_NAME/);
+});
 test.afterEach(()=>{globalThis.fetch=realFetch;});
 async function compiled(mode){
  const src=source
