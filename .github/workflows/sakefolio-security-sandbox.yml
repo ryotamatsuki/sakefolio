@@ -60,7 +60,7 @@ jobs:
           for(const marker of ['SAKEFOLIO_SECURITY_TEST_20261019','sakefolio-security-test-20261019-v1','sakefolio-security-test-20261019-international-local-v1']) {
             if(!bundle.includes(marker)) throw Error('Sandbox marker missing: '+marker);
           }
-          writeFileSync('dist/security-sandbox-build.json',JSON.stringify({mode:'security-test-20261019',sourceCommit:process.env.GITHUB_SHA,securitySource:'adfad8199a1d24df7101180f300bc787229132d7',publicSource:'13a7a709dc8057e6e1142716e69c7906c0d14699',driveFolder:'SAKEFOLIO_SECURITY_TEST_20261019',localDatabase:'sakefolio-security-test-20261019-international-local-v1'}));
+          writeFileSync('dist/security-sandbox-build.json',JSON.stringify({mode:'security-test-20261019',sourceCommit:process.env.GITHUB_SHA,securitySource:'4b0ff36e4e4c1679aa0a4c2cc81ebb0b08468571',publicSource:'13a7a709dc8057e6e1142716e69c7906c0d14699',driveFolder:'SAKEFOLIO_SECURITY_TEST_20261019',localDatabase:'sakefolio-security-test-20261019-international-local-v1'}));
           JS
       - name: Rebuild existing public version unchanged
         working-directory: public-source/web
