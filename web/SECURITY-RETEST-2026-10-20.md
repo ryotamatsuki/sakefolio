@@ -2,7 +2,7 @@
 
 ## Decision
 
-**NO GO.** PR #3 remains draft and unmerged. Branch head `5a0a6be4bfa65a837cab3f76d8b59b94c271ec18` is on `security/sakefolio-audit-2026`; its GitHub regression/build, npm audit, and CodeQL checks all pass. The hosted verification page is still running the earlier build, so several live checks cannot be completed against the revised code without changing the protected preview branch. No changes were made to `main`, PR #4, `test/sakefolio-pages-preview`, or existing Drive files.
+**NO GO.** PR #3 remains draft and unmerged. The security implementation and retest report are on `security/sakefolio-audit-2026`; GitHub regression/build, npm audit, and CodeQL checks pass. The hosted verification page is still running the earlier build, so several live checks cannot be completed against the revised code without changing the protected preview branch. No changes were made to `main`, PR #4, `test/sakefolio-pages-preview`, or existing Drive files.
 
 ## Findings and evidence
 
