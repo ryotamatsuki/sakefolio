@@ -5,8 +5,13 @@ import ts from 'typescript';
 
 // Exercise the actual API layer with deterministic HTTP responses, without Google credentials.
 const securityUrl = new URL('./security.ts', import.meta.url).href;
+const authSessionSource=readFileSync(new URL('./authSession.ts',import.meta.url),'utf8');
+const authSessionJs=ts.transpileModule(authSessionSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const authSessionUrl='data:text/javascript;base64,'+Buffer.from(authSessionJs).toString('base64');
+const authSession=await import(authSessionUrl);
 const source = readFileSync(new URL('./google.ts', import.meta.url), 'utf8')
   .replace("from './security'", `from '${securityUrl}'`)
+  .replace("from './authSession'", `from '${authSessionUrl}'`)
   .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID', "'test-client-id'")
   .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",'false');
 const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
@@ -28,6 +33,23 @@ test('expired token and access denial stop API access', async () => {
   for (const status of [401,403]) {
     globalThis.fetch = async () => json({error:{}},status);
     await assert.rejects(google.getDriveAccount('fake-token'), status===401 ? /有効期限/ : /権限/);
+  }
+});
+test('401 publishes a correlated authorization-invalid notice and clears no credential into the message',async()=>{
+  const previousWindow=globalThis.window,previousChannel=globalThis.BroadcastChannel;
+  globalThis.window=new EventTarget();globalThis.BroadcastChannel=undefined;
+  const notices=[];const stop=authSession.listenForAuthSessionSignals((type,eventId)=>notices.push({type,eventId}));
+  globalThis.fetch=async()=>json({error:{}},401);
+  try{
+    await assert.rejects(google.getDriveAccount('private-fake-token'),/有効期限/);
+    assert.equal(notices.length,1);
+    assert.equal(notices[0].type,'authorization-invalid');
+    assert.equal(notices[0].eventId.length>0,true);
+    assert.doesNotMatch(JSON.stringify(notices),/private-fake-token|access_token/);
+  }finally{
+    stop();
+    if(previousWindow===undefined)delete globalThis.window;else globalThis.window=previousWindow;
+    globalThis.BroadcastChannel=previousChannel;
   }
 });
 test('network failure propagates without retrying mutations', async () => {
@@ -59,9 +81,13 @@ test('OAuth cancellation rejects and requests only drive.file without accumulate
 });
 test('Google permission revocation reports both success and failure',async()=>{
   globalThis.window={google:{accounts:{oauth2:{revoke(_token,callback){callback({successful:true});}}}}};
-  assert.deepEqual(await google.revokeAccess('fake-token'),{successful:true});
+  const success=await google.revokeAccess('fake-token','logout-event-1');
+  assert.equal(success.successful,true);assert.equal(success.source,'callback');assert.equal(success.eventId,'logout-event-1');
+  assert.equal(typeof success.requestId,'string');assert.equal(typeof success.requestedAt,'string');
+  assert.equal(typeof success.completedAt,'string');assert.equal(typeof success.durationMs,'number');
   globalThis.window={google:{accounts:{oauth2:{revoke(_token,callback){callback({successful:false,error:'access_denied'});}}}}};
-  assert.deepEqual(await google.revokeAccess('fake-token'),{successful:false,error:'access_denied'});
+  const failure=await google.revokeAccess('fake-token');
+  assert.equal(failure.successful,false);assert.equal(failure.error,'access_denied');assert.equal(failure.source,'callback');
   delete globalThis.window;
   assert.equal((await google.revokeAccess('fake-token')).successful,false);
 });
@@ -127,7 +153,10 @@ function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false
       if(failUpload&&!failed){failed=true;throw new TypeError('Upload response lost');}
       return json({id:meta.id});
     }
-    if(url.pathname==='/drive/v3/files')return json({files:[...files.keys()].map(id=>({id}))});
+    if(url.pathname==='/drive/v3/files')return json({files:[...files.values()].map(file=>({
+      id:file.id,parents:file.parents,appProperties:file.appProperties,shared:file.shared??false,
+      permissions:file.permissions??[{type:'user',role:'owner'}]
+    }))});
     const id=decodeURIComponent(url.pathname.split('/').at(-1));
     if(!files.has(id))return json({},404);
     return url.searchParams.get('alt')==='media'?new Response(imageBytes,{headers:{'Content-Type':'image/png'}}):json(files.get(id));
@@ -224,6 +253,21 @@ test('read-only diagnostics identifies unlinked photo rows, missing files and in
   state.tables.Bottles.push(['orphan-bottle']);
   assert.match(await google.inspectStorage('first',storage),/写真ファイル不足 1件.*記録未完了の写真情報 1件.*未紐付け商品 1件/);
   assert.deepEqual(state.writes,[]);
+});
+
+test('read-only diagnostics checks photo appProperties, exact parent and sharing without exposing permissions',async()=>{
+  const state=mockGoogle();
+  await google.saveRecord('first',storage,record,[],image,{reviewId:'metadata-audit'});
+  assert.match(await google.inspectStorage('first',storage),/appProperties不一致 0件、親フォルダ不一致 0件、共有中 0件/);
+  const file=[...state.files.values()][0];
+  file.appProperties.reviewId='different-review';
+  file.parents=['other-folder'];
+  file.shared=true;
+  file.permissions=[{type:'anyone',role:'reader'}];
+  const result=await google.inspectStorage('first',storage);
+  assert.match(result,/appProperties不一致 1件、親フォルダ不一致 1件、共有中 1件/);
+  assert.doesNotMatch(result,/anyone|owner|different-review|other-folder/);
+  assert.deepEqual(state.writes.filter(value=>value!=='Drive'),['Bottles','Photos','Reviews']);
 });
 
 test('preview normalizes HEIC using Safari image fallback and closes object URL',async()=>{

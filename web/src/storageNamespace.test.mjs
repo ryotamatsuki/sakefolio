@@ -4,14 +4,19 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 
 const securityUrl=new URL('./security.ts',import.meta.url).href;
+const authSessionSource=readFileSync(new URL('./authSession.ts',import.meta.url),'utf8');
+const authSessionJs=ts.transpileModule(authSessionSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const authSessionUrl='data:text/javascript;base64,'+Buffer.from(authSessionJs).toString('base64');
 const source=readFileSync(new URL('./google.ts',import.meta.url),'utf8');
 const realFetch=globalThis.fetch;
 test.afterEach(()=>{globalThis.fetch=realFetch;});
 async function compiled(mode){
  const src=source
   .replace("from './security'", "from '"+securityUrl+"'")
+  .replace("from './authSession'", "from '"+authSessionUrl+"'")
   .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
-  .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",mode?'true':'false');
+  .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",mode?'true':'false')
+  .replace('configureSecurityAudit(SECURITY_TEST_MODE);','configureSecurityAudit(false);');
  const js=ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
  return import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
 }

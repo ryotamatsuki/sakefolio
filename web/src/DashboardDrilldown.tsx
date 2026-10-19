@@ -5,8 +5,8 @@ import type {RecordEntry} from './types';
 import {breweryMapsUrl} from './catalog';
 import {SENSORY_AXES,tagLabels} from './sensory';
 import {isDemoRecord,validRating} from './tasteAnalytics';
-import {drilldownIndexRows,getDrilldownRecords,indexChild,sortDrilldownRecords} from './dashboardDrilldown';
-import type {Drilldown,RecordSort} from './dashboardDrilldown';
+import {drilldownIndexRows,getDrilldownRecords,indexChild,sortDrilldownRecords} from './dashboardDrilldownModel';
+import type {Drilldown,RecordSort} from './dashboardDrilldownModel';
 
 interface Props {
   records:RecordEntry[];
