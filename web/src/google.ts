@@ -7,6 +7,10 @@ import { detectPhotoType, validateRecordInput, verifyPhoto } from './security';
  */
 export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+// Opt-in, build-time-only sandbox for real-account testing. Never enable on normal builds.
+const SECURITY_TEST_MODE = import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019';
+const STORAGE_FOLDER_NAME = SECURITY_TEST_MODE ? 'SAKEFOLIO_SECURITY_TEST_20261019' : 'Sakefolio';
+const STORAGE_SHEET_NAME = SECURITY_TEST_MODE ? 'SAKEFOLIO_SECURITY_TEST_20261019_Data' : 'Sakefolio_Data';
 
 const TABLE_HEADERS: Record<string, string[]> = {
   Brands: ['brandId','brandName','breweryName','prefecture','breweryId','areaId','source','sakenowaBrandId','createdAt','updatedAt','municipality','breweryAddress'],
@@ -75,7 +79,7 @@ export function revokeAccess(token: string): Promise<RevocationResponse> {
     catch { finish({successful:false,error:'unavailable'}); }
   });
 }
-const APP_MARKER = 'sakefolio-react-v1';
+const APP_MARKER = SECURITY_TEST_MODE ? 'sakefolio-security-test-20261019-v1' : 'sakefolio-react-v1';
 type FileKind = 'root' | 'photos-folder' | 'spreadsheet' | 'photo';
 const metadata = (kind: FileKind) => ({appProperties: {sakefolioApp: APP_MARKER, sakefolioKind:kind}});
 interface DriveFile { id: string; name?: string; mimeType?: string }
@@ -137,12 +141,12 @@ async function initializeSpreadsheet(token: string, id: string): Promise<void> {
 export async function ensureStorage(token: string): Promise<StorageInfo> {
   const folderMime = 'application/vnd.google-apps.folder';
   const sheetMime = 'application/vnd.google-apps.spreadsheet';
-  let folder = await findFile(token, 'Sakefolio', '', folderMime, 'root');
-  if (!folder) folder = await createFile(token,{name:'Sakefolio',mimeType:folderMime,...metadata('root')});
+  let folder = await findFile(token, STORAGE_FOLDER_NAME, '', folderMime, 'root');
+  if (!folder) folder = await createFile(token,{name:STORAGE_FOLDER_NAME,mimeType:folderMime,...metadata('root')});
   let photos = await findFile(token,'Photos',folder.id,folderMime,'photos-folder');
   if (!photos) photos = await createFile(token,{name:'Photos',mimeType:folderMime,parents:[folder.id],...metadata('photos-folder')});
-  let spreadsheet = await findFile(token,'Sakefolio_Data',folder.id,sheetMime,'spreadsheet');
-  if (!spreadsheet) spreadsheet = await createFile(token,{name:'Sakefolio_Data',mimeType:sheetMime,parents:[folder.id],...metadata('spreadsheet')});
+  let spreadsheet = await findFile(token,STORAGE_SHEET_NAME,folder.id,sheetMime,'spreadsheet');
+  if (!spreadsheet) spreadsheet = await createFile(token,{name:STORAGE_SHEET_NAME,mimeType:sheetMime,parents:[folder.id],...metadata('spreadsheet')});
   // Validate known schema. Only initialize an empty/partially created app-owned workbook;
   // never rewrite the headings of a populated workbook.
   const structure = await api<{sheets:{properties:{sheetId:number,title:string}}[]}>(token,

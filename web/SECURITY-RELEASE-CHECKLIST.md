@@ -25,3 +25,12 @@ This file documents the additional security work in Draft PR #3. No change to `m
 8. Obtain independent penetration testing and confirm up-to-date dependency auditing, CodeQL, functional regression testing, privacy notice and data export/deletion workflow.
 
 Do not merge or deploy Draft PR #3 without an explicit approved release step and evidence of the required real-account checks. Zero vulnerabilities can never be guaranteed.
+
+
+## Security audit fix-up (2026-10-19)
+
+- Ported the verified `style-src-attr 'unsafe-inline'` CSP exception only for inline **styles**, retaining the restricted `script-src` directive. Recheck delivered CSP in a real browser.
+- Added opt-in build flag `VITE_SAKEFOLIO_SECURITY_TEST=20261019`: namespaced Drive root `SAKEFOLIO_SECURITY_TEST_20261019`, workbook `SAKEFOLIO_SECURITY_TEST_20261019_Data`, app marker `sakefolio-security-test-20261019-v1`. **Never use this flag for ordinary deployment.**
+- Default namespace remains `Sakefolio` / `Sakefolio_Data` / `sakefolio-react-v1`. Sandbox and normal builds cannot intentionally discover each other's app-marked files. New tests assert both pathways without actual Drive mutations.
+- Intentionally **did not copy** the audit branch's full `google.ts`, because it contains a truncated portion relative to PR #3 and could drop retry/metadata validation logic.
+- Pending before personal-Google OAuth signoff: Cloud Console origins/scopes, real Save/Read/Photo/Revoke in sandbox, browser CSP and iPhone Safari. On GitHub Pages, `_headers` does not apply; the shared-origin risk remains.

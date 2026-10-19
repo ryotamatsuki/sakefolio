@@ -12,7 +12,8 @@ const compile=(source,replacements=[])=>{
 };
 const googleSource=readFileSync(new URL('./google.ts',import.meta.url),'utf8');
 const googleUrl=compile(googleSource.replace("from './security'",`from '${securityUrl}'`)
-  .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'"));
+  .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
+  .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",'false'));
 const photosSource=readFileSync(new URL('./photos.ts',import.meta.url),'utf8');
 const photosUrl=compile(photosSource.replace("from './security.ts'",`from '${securityUrl}'`));
 const cloudSource=readFileSync(new URL('./internationalCloud.ts',import.meta.url),'utf8');

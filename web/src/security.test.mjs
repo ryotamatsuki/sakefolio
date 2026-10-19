@@ -35,12 +35,18 @@ test('OAuth scope is limited and tokens are never persisted by Google API layer'
   assert.doesNotMatch(source,/localStorage\s*[.\[]|sessionStorage\s*[.\[]/);
   assert.match(source,/valueInputOption=RAW/);
   assert.match(source,/sakefolioApp/);
+  assert.match(source,/VITE_SAKEFOLIO_SECURITY_TEST/);
+  assert.match(source,/SAKEFOLIO_SECURITY_TEST_20261019/);
 });
 test('index restricts script origins and forbids eval/inline JavaScript',()=>{
   const html=readFileSync(new URL('../index.html', import.meta.url),'utf8');
+  const headers=readFileSync(new URL('../public/_headers', import.meta.url),'utf8');
   assert.match(html,/http-equiv="Content-Security-Policy"/);
+  assert.match(html,/style-src-attr 'unsafe-inline'/);
+  assert.match(headers,/style-src-attr 'unsafe-inline'/);
   assert.match(html,/script-src 'self' https:\/\/accounts\.google\.com\/gsi\/client/);
   assert.match(html,/object-src 'none'/);
   assert.match(html,/base-uri 'none'/);
-  assert.doesNotMatch(html,/unsafe-inline|unsafe-eval/);
+  assert.doesNotMatch(html,/script-src[^;\"]*unsafe-inline/);
+  assert.doesNotMatch(html,/unsafe-eval/);
 });

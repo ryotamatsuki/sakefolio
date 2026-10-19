@@ -7,7 +7,8 @@ import ts from 'typescript';
 const securityUrl = new URL('./security.ts', import.meta.url).href;
 const source = readFileSync(new URL('./google.ts', import.meta.url), 'utf8')
   .replace("from './security'", `from '${securityUrl}'`)
-  .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID', "'test-client-id'");
+  .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID', "'test-client-id'")
+  .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",'false');
 const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
 const google = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 const realFetch = globalThis.fetch;
