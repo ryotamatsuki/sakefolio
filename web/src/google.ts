@@ -28,9 +28,10 @@ function extractError(_json: unknown, status: number): Error {
   return new Error('Google APIエラー (HTTP ' + status + ')。通信を確認して再試行してください。');
 }
 async function api<T>(token: string, url: string, init: RequestInit = {}): Promise<T> {
+  init.signal?.throwIfAborted();
   const response = await fetch(url, {
     ...init,
-    signal: init.signal || AbortSignal.timeout(45000),
+    signal: init.signal ? AbortSignal.any([init.signal,AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000),
     headers: {
       'Authorization': 'Bearer ' + token,
       ...(init.body && !(init.body instanceof Blob) ? {'Content-Type': 'application/json'} : {}),
@@ -212,7 +213,8 @@ export async function loadManualBrands(token: string, storage: StorageInfo): Pro
     breweryAddress: String(row[headers.indexOf('breweryAddress')] || '')
   }));
 }
-export async function uploadPhoto(token: string, folderId: string, file: File, id?: string, reviewId?: string): Promise<string> {
+export async function uploadPhoto(token: string, folderId: string, file: File, id?: string, reviewId?: string, signal?:AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const verified = await verifyPhoto(file);
   const boundary = 'sakefolio_' + crypto.randomUUID().replace(/-/g,'');
   // Generated name and content type derive from verified magic bytes, not user input.
@@ -231,7 +233,7 @@ export async function uploadPhoto(token: string, folderId: string, file: File, i
   ]);
   const result = await api<{id:string}>(token,
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
-      method:'POST', headers: {'Content-Type':'multipart/related; boundary=' + boundary}, body
+      method:'POST', headers: {'Content-Type':'multipart/related; boundary=' + boundary}, body, signal
     });
   if (!result.id) throw new Error('写真保存後のファイルIDを取得できませんでした。');
   return result.id;
@@ -240,12 +242,13 @@ export async function uploadPhoto(token: string, folderId: string, file: File, i
  * photo in the current Sakefolio photo folder. Never download arbitrary Drive files.
  * A Sheet cell is untrusted even when read through the user's own OAuth token.
  */
-export async function getPhotoBlob(token: string, id: string, expectedFolderId?: string): Promise<Blob> {
+export async function getPhotoBlob(token: string, id: string, expectedFolderId?: string, signal?:AbortSignal): Promise<Blob> {
+  signal?.throwIfAborted();
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(id))
     throw new Error('写真IDが正しい形式ではありません。');
   const url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id);
   const meta=await api<{id?:string;mimeType?:string;parents?:string[];trashed?:boolean;
-    appProperties?:Record<string,string>}>(token,url+'?fields=id,mimeType,parents,trashed,appProperties');
+    appProperties?:Record<string,string>}>(token,url+'?fields=id,mimeType,parents,trashed,appProperties',{signal});
   if (meta.id!==id||meta.trashed===true||
     meta.appProperties?.sakefolioApp!==APP_MARKER||meta.appProperties?.sakefolioKind!=='photo'||
     (expectedFolderId&&!meta.parents?.includes(expectedFolderId)))
@@ -253,8 +256,9 @@ export async function getPhotoBlob(token: string, id: string, expectedFolderId?:
   // The app never creates active-content MIME types.
   if (!meta.mimeType||!['image/jpeg','image/png','image/webp','image/heic','image/heif','image/avif'].includes(meta.mimeType))
     throw new Error('写真のMIMEタイプが許可されていません。');
+  signal?.throwIfAborted();
   const response=await fetch(url+'?alt=media',{
-    signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}
+    signal:signal?AbortSignal.any([signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}
   }).catch(()=>{throw new Error('写真の通信エラー。接続を確認してください。');});
   if (!response.ok) throw extractError(undefined,response.status);
   const contentLength=Number(response.headers.get('Content-Length')||'0');

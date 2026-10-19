@@ -39,6 +39,16 @@ const makeRecord=()=>({
   tastedAt:'',rating:'',aroma:'',taste:'',notes:'',createdAt:'2026-10-18T00:00:00.000Z',photo:null
 });
 
+test('a cancelled China save cannot start the next Sheets request',async()=>{
+  const controller=new AbortController();const calls=[];
+  globalThis.fetch=async(input)=>{
+    calls.push(String(input));controller.abort();
+    return new Response(JSON.stringify({sheets:[{properties:{sheetId:1,title:'ChinaDrinks'}}]}));
+  };
+  await assert.rejects(normal.saveChinaCloud('fake-token',storage,makeRecord(),null,controller.signal),{name:'AbortError'});
+  assert.equal(calls.length,1,'must stop before the header read or any write');
+});
+
 for(const mode of [false,true])for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks '+(mode?'sandbox':'normal')+' retry after '+(writeBeforeLostResponse?'committed response loss':'pre-write network failure')+' reuses one photo',async()=>{
   const rows=[[...CHINA_HEADERS]];const files=new Map();let uploads=0,appends=0,failed=false;
   globalThis.createImageBitmap=async()=>({width:800,height:600,close(){}});

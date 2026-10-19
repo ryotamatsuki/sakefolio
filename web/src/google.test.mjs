@@ -36,6 +36,16 @@ test('network failure propagates without retrying mutations', async () => {
   await assert.rejects(google.ensureStorage('fake-token'),/通信エラー/);
   assert.equal(calls,1);
 });
+test('logout during photo metadata lookup prevents a later media download',async()=>{
+  const controller=new AbortController();let calls=0;
+  globalThis.fetch=async()=>{
+    calls++;controller.abort();
+    return json({id:'photo-id',mimeType:'image/png',parents:['test-photos'],
+      appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo'}});
+  };
+  await assert.rejects(google.getPhotoBlob('fake-token','photo-id','test-photos',controller.signal),{name:'AbortError'});
+  assert.equal(calls,1);
+});
 test('OAuth cancellation rejects and requests only drive.file without accumulated grants',async()=>{
   globalThis.window={google:{accounts:{oauth2:{initTokenClient(config){
     assert.equal(config.scope,google.GOOGLE_SCOPE);

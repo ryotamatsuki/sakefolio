@@ -60,7 +60,7 @@ jobs:
           for(const marker of ['SAKEFOLIO_SECURITY_TEST_20261019','sakefolio-security-test-20261019-v1','sakefolio-security-test-20261019-international-local-v1']) {
             if(!bundle.includes(marker)) throw Error('Sandbox marker missing: '+marker);
           }
-          writeFileSync('dist/security-sandbox-build.json',JSON.stringify({mode:'security-test-20261019',sourceCommit:process.env.GITHUB_SHA,publicSource:'13a7a709dc8057e6e1142716e69c7906c0d14699',driveFolder:'SAKEFOLIO_SECURITY_TEST_20261019',localDatabase:'sakefolio-security-test-20261019-international-local-v1'}));
+          writeFileSync('dist/security-sandbox-build.json',JSON.stringify({mode:'security-test-20261019',sourceCommit:process.env.GITHUB_SHA,securitySource:'adfad8199a1d24df7101180f300bc787229132d7',publicSource:'13a7a709dc8057e6e1142716e69c7906c0d14699',driveFolder:'SAKEFOLIO_SECURITY_TEST_20261019',localDatabase:'sakefolio-security-test-20261019-international-local-v1'}));
           JS
       - name: Rebuild existing public version unchanged
         working-directory: public-source/web
@@ -70,6 +70,9 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run build
+      - name: Verify all public baseline files before deployment
+        working-directory: public-source/web
+        run: sha256sum --check ../../.github/sakefolio-public-baseline-13a7a709.sha256
       - name: Assemble public root and sandbox subdirectory
         run: |
           mkdir -p site/security-test-20261019
