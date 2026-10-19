@@ -40,7 +40,17 @@ export interface RecordEntry {
 }
 export interface StorageInfo { folderId: string; spreadsheetId: string; photoFolderId: string }
 export interface TokenResponse { access_token?: string; error?: string; error_description?: string }
-export interface RevocationResponse { successful: boolean; error?: string; error_description?: string }
+export interface RevocationResponse {
+  successful: boolean;
+  error?: string;
+  error_description?: string;
+  requestId?: string;
+  eventId?: string;
+  requestedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  source?: 'callback' | 'timeout' | 'unavailable' | 'exception';
+}
 declare global {
   interface Window {
     google?: { accounts: { oauth2: {

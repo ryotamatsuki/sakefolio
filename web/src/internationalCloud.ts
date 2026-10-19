@@ -6,6 +6,7 @@ import type {InternationalRecord} from './internationalLocal';
 import {validateInternationalRecord} from './internationalLocal.ts';
 import {APP_MARKER,uploadPhoto,getPhotoBlob} from './google.ts';
 import {sanitizePhotoForStorage} from './photos.ts';
+import {notifyAuthSessionSignal,recordAuthAuditEvent} from './authSession';
 
 export const CHINA_TABLE='ChinaDrinks';
 export const CHINA_HEADERS=[
@@ -19,8 +20,23 @@ const location="'"+CHINA_TABLE+"'!";
 async function sheetApi<T>(token:string,url:string,init:RequestInit={}):Promise<T>{
  if(!token)throw Error('Googleアカウントに接続してください。');
  init.signal?.throwIfAborted();
- const response=await fetch(url,{...init,signal:init.signal?AbortSignal.any([init.signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000),
-   headers:{Authorization:'Bearer '+token,...(init.body?{'Content-Type':'application/json'}:{}),...(init.headers||{})}});
+ const requestId=crypto.randomUUID(),startedAt=Date.now();
+ recordAuthAuditEvent('api-request',{requestId,tokenPresent:true,apiHost:'sheets.googleapis.com',method:(init.method||'GET').toUpperCase() as 'GET'|'POST'|'PUT'});
+ let response:Response;
+ try{
+   response=await fetch(url,{...init,signal:init.signal?AbortSignal.any([init.signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000),
+     headers:{Authorization:'Bearer '+token,...(init.body?{'Content-Type':'application/json'}:{}),...(init.headers||{})}});
+ }catch(error){
+   const aborted=init.signal?.aborted||error instanceof Error&&error.name==='AbortError';
+   const timeout=error instanceof Error&&error.name==='TimeoutError';
+   recordAuthAuditEvent('api-response',{requestId,tokenPresent:true,apiHost:'sheets.googleapis.com',
+     outcome:aborted?'aborted':timeout?'timeout':'network-error',durationMs:Date.now()-startedAt});
+   if(aborted)throw error;
+   throw Error(timeout?'中国酒のGoogle Sheets応答がタイムアウトしました。接続を確認して再試行してください。':'中国酒のGoogle Sheets通信エラー。接続を確認して再試行してください。');
+ }
+ const eventId=response.status===401?notifyAuthSessionSignal('authorization-invalid'):undefined;
+ recordAuthAuditEvent('api-response',{requestId,tokenPresent:true,apiHost:'sheets.googleapis.com',status:response.status,
+   ...(eventId?{eventId}:{}),outcome:response.status===401?'unauthorized':response.ok?'success':'failure',durationMs:Date.now()-startedAt});
  if(!response.ok)throw Error('中国酒のGoogle Sheets保存・読み込みに失敗しました（HTTP '+response.status+'）。');
  return response.json() as Promise<T>;
 }

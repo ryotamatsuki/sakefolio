@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {detailOfInsight,drilldownIndexRows,getDrilldownRecords,indexChild,matchesDrilldown,sortDrilldownRecords} from './dashboardDrilldown.ts';
+import {detailOfInsight,drilldownIndexRows,getDrilldownRecords,indexChild,matchesDrilldown,sortDrilldownRecords} from './dashboardDrilldownModel.ts';
 import {isDemoRecord} from './tasteAnalytics.ts';
 function r(id,brand,pref,score,more={}){return {
   reviewId:id,brandName:brand,breweryName:brand+'酒造',prefecture:pref,

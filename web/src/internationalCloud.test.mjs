@@ -4,6 +4,9 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 
 const securityUrl=new URL('./security.ts',import.meta.url).href;
+const authSessionSource=readFileSync(new URL('./authSession.ts',import.meta.url),'utf8');
+const authSessionJs=ts.transpileModule(authSessionSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const authSessionUrl='data:text/javascript;base64,'+Buffer.from(authSessionJs).toString('base64');
 const localUrl=new URL('./internationalLocal.ts',import.meta.url).href;
 const compile=(source,replacements=[])=>{
   for(const [from,to] of replacements)source=source.replace(from,to);
@@ -16,12 +19,15 @@ const photosUrl=compile(photosSource.replace("from './security.ts'",`from '${sec
 const cloudSource=readFileSync(new URL('./internationalCloud.ts',import.meta.url),'utf8');
 async function cloudForMode(mode){
   const googleUrl=compile(googleSource.replace("from './security'",`from '${securityUrl}'`)
+    .replace("from './authSession'",`from '${authSessionUrl}'`)
     .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
-    .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",mode?'true':'false'));
+    .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",mode?'true':'false')
+    .replace('configureSecurityAudit(SECURITY_TEST_MODE);','configureSecurityAudit(false);'));
   const cloudUrl=compile(cloudSource,[
     ["from './google.ts'",`from '${googleUrl}'`],
     ["from './photos.ts'",`from '${photosUrl}'`],
-    ["from './internationalLocal.ts'",`from '${localUrl}'`]
+    ["from './internationalLocal.ts'",`from '${localUrl}'`],
+    ["from './authSession'",`from '${authSessionUrl}'`]
   ]);
   return import(cloudUrl);
 }
@@ -97,7 +103,7 @@ for(const mode of [false,true])for(const writeBeforeLostResponse of [false,true]
   const photo=new File([new Uint8Array([0xff,0xd8,0xff,...Buffer.from('EXIF-SECRET-LOCATION')])],'photo.jpg',{type:'image/jpeg'});
   const record=makeRecord();
   const saveChinaCloud=mode?sandbox.saveChinaCloud:normal.saveChinaCloud;
-  await assert.rejects(saveChinaCloud('fake-token',storage,record,photo),/Network disconnected/);
+  await assert.rejects(saveChinaCloud('fake-token',storage,record,photo),/通信エラー/);
   assert.equal(record.photoId,'reserved-photo-id');
   await saveChinaCloud('fake-token',storage,record,photo);
   assert.equal(rows.length,2);
