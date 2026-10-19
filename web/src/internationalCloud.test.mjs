@@ -11,18 +11,23 @@ const compile=(source,replacements=[])=>{
   return 'data:text/javascript;base64,'+Buffer.from(js).toString('base64');
 };
 const googleSource=readFileSync(new URL('./google.ts',import.meta.url),'utf8');
-const googleUrl=compile(googleSource.replace("from './security'",`from '${securityUrl}'`)
-  .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
-  .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",'false'));
 const photosSource=readFileSync(new URL('./photos.ts',import.meta.url),'utf8');
 const photosUrl=compile(photosSource.replace("from './security.ts'",`from '${securityUrl}'`));
 const cloudSource=readFileSync(new URL('./internationalCloud.ts',import.meta.url),'utf8');
-const cloudUrl=compile(cloudSource,[
-  ["from './google.ts'",`from '${googleUrl}'`],
-  ["from './photos.ts'",`from '${photosUrl}'`],
-  ["from './internationalLocal.ts'",`from '${localUrl}'`]
-]);
-const {CHINA_HEADERS,saveChinaCloud}=await import(cloudUrl);
+async function cloudForMode(mode){
+  const googleUrl=compile(googleSource.replace("from './security'",`from '${securityUrl}'`)
+    .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
+    .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",mode?'true':'false'));
+  const cloudUrl=compile(cloudSource,[
+    ["from './google.ts'",`from '${googleUrl}'`],
+    ["from './photos.ts'",`from '${photosUrl}'`],
+    ["from './internationalLocal.ts'",`from '${localUrl}'`]
+  ]);
+  return import(cloudUrl);
+}
+const normal=await cloudForMode(false);
+const sandbox=await cloudForMode(true);
+const {CHINA_HEADERS}=normal;
 const real={fetch:globalThis.fetch,createImageBitmap:globalThis.createImageBitmap,document:globalThis.document};
 test.afterEach(()=>Object.assign(globalThis,real));
 
@@ -34,7 +39,7 @@ const makeRecord=()=>({
   tastedAt:'',rating:'',aroma:'',taste:'',notes:'',createdAt:'2026-10-18T00:00:00.000Z',photo:null
 });
 
-for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks retry after '+(writeBeforeLostResponse?'committed response loss':'pre-write network failure')+' reuses one photo',async()=>{
+for(const mode of [false,true])for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks '+(mode?'sandbox':'normal')+' retry after '+(writeBeforeLostResponse?'committed response loss':'pre-write network failure')+' reuses one photo',async()=>{
   const rows=[[...CHINA_HEADERS]];const files=new Map();let uploads=0,appends=0,failed=false;
   globalThis.createImageBitmap=async()=>({width:800,height:600,close(){}});
   globalThis.document={createElement(){return {getContext(){return {drawImage(){}};},toBlob(cb,type){cb(new Blob([png],{type}));}};}};
@@ -66,6 +71,7 @@ for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks retry after 
       const meta=JSON.parse(body.split('\r\n\r\n')[1].split('\r\n--')[0]);
       assert.equal(meta.id,'reserved-photo-id');
       assert.deepEqual(meta.parents,['test-photos']);
+      assert.equal(meta.appProperties.sakefolioApp,mode?'sakefolio-security-test-20261019-v1':'sakefolio-react-v1');
       files.set(meta.id,{...meta,mimeType:'image/png',trashed:false});uploads++;
       return new Response(JSON.stringify({id:meta.id}));
     }
@@ -80,6 +86,7 @@ for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks retry after 
   };
   const photo=new File([new Uint8Array([0xff,0xd8,0xff,...Buffer.from('EXIF-SECRET-LOCATION')])],'photo.jpg',{type:'image/jpeg'});
   const record=makeRecord();
+  const saveChinaCloud=mode?sandbox.saveChinaCloud:normal.saveChinaCloud;
   await assert.rejects(saveChinaCloud('fake-token',storage,record,photo),/Network disconnected/);
   assert.equal(record.photoId,'reserved-photo-id');
   await saveChinaCloud('fake-token',storage,record,photo);
