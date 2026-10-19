@@ -34,3 +34,11 @@ Do not merge or deploy Draft PR #3 without an explicit approved release step and
 - Default namespace remains `Sakefolio` / `Sakefolio_Data` / `sakefolio-react-v1`. Sandbox and normal builds cannot intentionally discover each other's app-marked files. New tests assert both pathways without actual Drive mutations.
 - Intentionally **did not copy** the audit branch's full `google.ts`, because it contains a truncated portion relative to PR #3 and could drop retry/metadata validation logic.
 - Pending before personal-Google OAuth signoff: Cloud Console origins/scopes, real Save/Read/Photo/Revoke in sandbox, browser CSP and iPhone Safari. On GitHub Pages, `_headers` does not apply; the shared-origin risk remains.
+
+## Follow-up independent review — 2026-10-19
+
+- Fixed a further stale-export race in ChinaDrinks: an export started under account A could previously complete an asynchronous photo fetch and trigger the browser download after unmount or account switch. The backup operation now has its own generation guard, checked before downloading and invalidated on account change/unmount. A regression check covers the download boundary.
+- Fixed a sandbox-specific retry mismatch: ChinaDrinks previously hard-coded `sakefolio-react-v1` when verifying an existing reserved photo ID. It now imports the active app marker from `google.ts`; regression tests exercise both normal and opt-in sandbox modes.
+- The `sakefolio-preview.yml` workflow deploys automatically on a push to `test/sakefolio-pages-preview`. Its current build does **not** set `VITE_SAKEFOLIO_SECURITY_TEST`; merging this PR would publish a **normal-namespace** build, not the isolated Drive sandbox build. Do not merge merely because branch CI is green.
+- The connected browser was unavailable for automated live sign-in (requires an originating browser context); no live Google OAuth, personal-account Drive/Sheets/photo, revocation, Safari, or delivered-header tests were completed in this review. No Google Drive user data was written.
+- **Status: still NO GO for merge/deployment and inviting other Google users.** Require successful live sandbox checks and deliberate review of the Pages auto-deploy/origin path first.
