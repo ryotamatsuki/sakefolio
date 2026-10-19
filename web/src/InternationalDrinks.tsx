@@ -74,6 +74,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
  const [pendingCloudSheet,setPendingCloudSheet]=useState('');
  const pendingCloudSave=useRef<{spreadsheetId:string;record:InternationalRecord;photo:File|null}|null>(null);
  const loadGate=useRef(createRequestGate());
+ const backupGate=useRef(createRequestGate());
  const [filter,setFilter]=useState<BeverageKind|'all'>('all');
  const [lastSearch,setLastSearch]=useState(0);
  const [section,setSection]=useState<'new'|'collection'|'map'|'insights'>('new');
@@ -101,7 +102,7 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
    const isCurrent=()=>active&&current();
    setRecords([]);setReady(false);setSelected('');
    void load(isCurrent);
-   return()=>{active=false;loadGate.current.invalidate();};
+   return()=>{active=false;loadGate.current.invalidate();backupGate.current.invalidate();};
  },[token,storage?.spreadsheetId]);
  useEffect(()=>{
    let active=true;
@@ -205,15 +206,20 @@ export default function InternationalDrinks({token,storage,onConnect}:Props){
    finally{setBusy(false);}
  };
  const backup=async()=>{
+   // Account changes, unmounts and newer export attempts invalidate this export.
+   const isCurrent=backupGate.current.begin();
    setError('');setStatus('');
    try{
      const complete=await Promise.all(records.map(async r=>({...r,
        photo:r.photo||(r.photoId&&token?await getPhotoBlob(token,r.photoId,storage?.photoFolderId):null)})));
-     const blob=await buildBackup(complete),url=URL.createObjectURL(blob),a=document.createElement('a');
+     if(!isCurrent())return;
+     const blob=await buildBackup(complete);
+     if(!isCurrent())return;
+     const url=URL.createObjectURL(blob),a=document.createElement('a');
      a.href=url;a.download='sakefolio-china-backup-'+today()+'.json';a.click();
      setTimeout(()=>URL.revokeObjectURL(url),60000);
      setStatus('バックアップのダウンロードを開始しました。端末外にも安全に保管してください。');
-   }catch(e){setError(e instanceof Error?e.message:'書き出しに失敗しました。');}
+   }catch(e){if(isCurrent())setError(e instanceof Error?e.message:'書き出しに失敗しました。');}
  };
  const restore=async(e:ChangeEvent<HTMLInputElement>)=>{
    const file=e.target.files?.[0];e.target.value='';if(!file)return;
