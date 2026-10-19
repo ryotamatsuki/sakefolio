@@ -37,7 +37,9 @@ test('test-mode save lock rejects concurrent tabs and passes no credential data'
   assert.deepEqual(captured,[{name:'sakefolio-save:test:review',options:['ifAvailable','mode']}]);
   const occupied={request:async(_name,_options,callback)=>callback(null)};
   await assert.rejects(withSaveAttemptLock('sakefolio-save:test:review',async()=>17,occupied),/別タブ/);
-  await assert.rejects(withSaveAttemptLock('sakefolio-save:test:review',async()=>17,undefined),/安全な複数タブ/);
+  // Pass null to model a browser without Web Locks. Passing undefined activates
+  // the production default, which is available in some Node 24 runtimes.
+  await assert.rejects(withSaveAttemptLock('sakefolio-save:test:review',async()=>17,null),/安全な複数タブ/);
 });
 
 class MemoryIndexedDB {

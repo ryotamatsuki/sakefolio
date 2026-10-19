@@ -2,7 +2,7 @@
 
 ## Decision
 
-**NO GO.** PR #3 remains draft and unmerged. The code changes below pass local regression tests and the production build, but the updated branch has not been pushed, the hosted verification page is still running the earlier build, and several live checks cannot be completed against that build. No changes were made to `main`, PR #4, `test/sakefolio-pages-preview`, or existing Drive files.
+**NO GO.** PR #3 remains draft and unmerged. Branch head `a5bb7bfd373eb8177a21875046411dc69cc1d396` was pushed to `security/sakefolio-audit-2026`; the hosted verification page is still running the earlier build, and several live checks cannot be completed against that build. The first GitHub run found a test-harness mismatch; the test was corrected and local regression tests/build now pass. The rerun is pending. No changes were made to `main`, PR #4, `test/sakefolio-pages-preview`, or existing Drive files.
 
 ## Findings and evidence
 
@@ -19,10 +19,10 @@
 | Google permission revocation and reauthentication | **BLOCKED for fresh live evidence** | The current page is logged out and retained no redacted revoke/API audit events. New code distinguishes local logout from the asynchronous Google revoke callback; callback success is reported as request acceptance, not proof that all already-issued tokens stopped working immediately. |
 | Google Cloud and browser security settings | **BLOCKED in part** | Cloud Data Access mismatch remains. Chrome extension “Allow access to file URLs” was reported enabled earlier. No Cloud OAuth setting was altered. |
 | 2-account isolation and iPhone Safari | **BLOCKED / residual risk** | Only one Google account has been authorized. No B/A account isolation or iPhone Safari result is claimed. |
-| Regression tests | **PASS** | `npm run test:security`: **116 passed, 0 failed**. |
-| Build | **PASS** | `npm run build`: TypeScript check and Vite production build succeeded. The case-only `dashboardDrilldown.ts` filename collision on Windows was fixed by renaming the model file. |
-| `npm audit --audit-level=high` | **BLOCKED** | The sandboxed request could not reach the npm advisory endpoint. An escalated retry was rejected by automatic review because it would send dependency metadata to `registry.npmjs.org`; no workaround was attempted. |
-| CodeQL | **BLOCKED** | CodeQL is not installed locally. Pushing this branch would trigger the repository workflow that runs `npm audit`, so the branch was not pushed after the automatic review rejection. Existing PR head SHA has no workflow runs or status checks. |
+| Regression tests | **Local PASS; first CI attempt FAIL, corrected; CI rerun pending** | Local `npm run test:security`: **116 passed, 0 failed** after changing the missing-Web-Locks test fixture to pass `null`. The first remote run had 115 passed and 1 failed because Node 24 supplied its default `navigator.locks` when the test passed `undefined`; no product assertion failed. |
+| Build | **Local PASS; CI rerun pending** | `npm run build`: TypeScript check and Vite production build succeeded after the test-only correction. The case-only `dashboardDrilldown.ts` filename collision on Windows was fixed by renaming the model file. |
+| `npm audit --audit-level=high` | **PASS on first CI attempt** | GitHub Actions reported `found 0 vulnerabilities` for commit `a5bb7bfd373eb8177a21875046411dc69cc1d396`. The user authorized sending dependency metadata to npm for this audit. |
+| CodeQL | **PENDING** | CodeQL security scan was triggered for commit `a5bb7bfd373eb8177a21875046411dc69cc1d396` and was in progress at the last check. |
 
 ## Required Google Cloud action
 
@@ -30,4 +30,4 @@ In the `sakefolio` Google Cloud project, open **Google Auth Platform → Data Ac
 
 ## Release gate
 
-Keep **NO GO** until the revised PR branch can be pushed and its tests, build, CodeQL, and dependency audit complete; the updated sandbox build is available for Chrome retry/logout/photo-metadata checks; Cloud Data Access matches `drive.file`; and the existing two-account and iPhone Safari residual tests have owners/results. A successful revoke callback alone must not be used as evidence that an API request with an already-issued token immediately fails.
+Keep **NO GO** until the PR branch's rerun tests/build and CodeQL complete; the updated sandbox build is available for Chrome retry/logout/photo-metadata checks; Cloud Data Access matches `drive.file`; and the existing two-account and iPhone Safari residual tests have owners/results. A successful revoke callback alone must not be used as evidence that an API request with an already-issued token immediately fails.
