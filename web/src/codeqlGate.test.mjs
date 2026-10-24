@@ -9,6 +9,16 @@ test('CodeQL gate counts high/critical by ruleIndex or ruleId',()=>{
 test('CodeQL gate accepts an actually empty result set',()=>{
   assert.deepEqual(summarizeSarif(sarif([],[])),{results:0,criticalHigh:0});
 });
+test('CodeQL gate resolves extension component rule locations without dropping high findings',()=>{
+  const report={runs:[{tool:{driver:{rules:[]},extensions:[{name:'queries',rules:[{id:'high',properties:{'security-severity':'8.1'}}]}]},
+    results:[{rule:{id:'high',index:0,toolComponent:{index:0}}}]}]};
+  assert.deepEqual(summarizeSarif(report),{results:1,criticalHigh:1});
+});
+test('CodeQL gate resolves legacy rule IDs across components and rejects ambiguous IDs',()=>{
+  const report={runs:[{tool:{driver:{rules:[]},extensions:[{rules:[{id:'high',properties:{'security-severity':'8'}}]}]},results:[{ruleId:'high'}]}]};
+  assert.deepEqual(summarizeSarif(report),{results:1,criticalHigh:1});
+  report.runs[0].tool.driver.rules.push({id:'high'});assert.throws(()=>summarizeSarif(report));
+});
 test('CodeQL gate fails closed on absent runs, results, or rule metadata',()=>{
   for(const report of [{},{runs:[]},{runs:[{}]},sarif([],[{ruleId:'unknown'}])])assert.throws(()=>summarizeSarif(report));
 });

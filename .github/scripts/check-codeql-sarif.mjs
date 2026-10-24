@@ -7,9 +7,17 @@ export function summarizeSarif(sarif){
   let results=0,criticalHigh=0;
   for(const run of sarif.runs){
     if(!Array.isArray(run.results))throw Error('CodeQL results missing');
-    const rules=run.tool?.driver?.rules||[];
+    const driver=run.tool?.driver,extensions=run.tool?.extensions||[];
     for(const result of run.results){
-      const rule=rules[result.ruleIndex]||rules.find(rule=>rule.id===result.ruleId);
+      const location=result.rule,componentRef=location?.toolComponent;
+      const component=componentRef
+        ? (componentRef.index!==undefined?extensions[componentRef.index]
+          : [driver,...extensions].find(c=>c&&(componentRef.guid?c.guid===componentRef.guid:c.name===componentRef.name)))
+        : driver;
+      const id=result.ruleId||location?.id;
+      const indexed=component?.rules?.[location?.index??result.ruleIndex];
+      const matches=[driver,...extensions].flatMap(c=>c?.rules||[]).filter(rule=>id&&rule.id===id);
+      const rule=indexed&&(!id||indexed.id===id)?indexed:matches.length===1?matches[0]:undefined;
       if(!rule)throw Error('CodeQL result rule missing');
       results++;
       if(Number(rule.properties?.['security-severity']||0)>=7)criticalHigh++;

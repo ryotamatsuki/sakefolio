@@ -39,3 +39,11 @@ jobs:
           output: codeql-results
       - name: Reject current High or Critical CodeQL findings
         run: node .github/scripts/check-codeql-sarif.mjs codeql-results
+      - name: Preserve CodeQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sakefolio-codeql-sarif
+          path: codeql-results/*.sarif
+          if-no-files-found: error
+          retention-days: 7
