@@ -55,7 +55,7 @@ test('a cancelled China save cannot start the next Sheets request',async()=>{
   assert.equal(calls.length,1,'must stop before the header read or any write');
 });
 
-for(const mode of [false,true])for(const fault of ['before','after','logout','timeout','upload-lost'])test('P0 ChinaDrinks '+(mode?'sandbox':'normal')+' '+fault+' retry preserves one record/photo',async()=>{
+for(const mode of [false,true])for(const fault of ['before','append-before','after','logout','timeout','upload-lost'])test('P0 ChinaDrinks '+(mode?'sandbox':'normal')+' '+fault+' retry preserves one record/photo',async()=>{
   const rows=[[...CHINA_HEADERS]];const files=new Map();let uploads=0,appends=0,failed=false;
   const controller=new AbortController();let release,entered;const reached=new Promise(resolve=>{entered=resolve;});
   globalThis.createImageBitmap=async()=>({width:800,height:600,close(){}});
@@ -72,7 +72,7 @@ for(const mode of [false,true])for(const fault of ['before','after','logout','ti
         if(range.includes(':append')){
           appends++;
           const pendingRows=JSON.parse(init.body).values;
-          if(!failed&&['after','logout','timeout'].includes(fault)){
+          if(!failed&&['append-before','after','logout','timeout'].includes(fault)){
             failed=true;
             if(fault==='after'||fault==='logout')rows.push(...pendingRows);
             if(fault==='logout'){entered();await new Promise(resolve=>{release=resolve;});return new Response('{}');}
@@ -122,6 +122,7 @@ for(const mode of [false,true])for(const fault of ['before','after','logout','ti
   assert.equal(rows[1][0],record.id);
   assert.equal(rows[1][16],'reserved-photo-id');
   assert.equal(uploads,1);
-  assert.equal(appends,fault==='timeout'?2:1);
+  assert.equal(appends,['append-before','timeout'].includes(fault)?2:1);
   assert.equal(files.get(rows[1][16]).appProperties.reviewId,record.id);
 });
+
