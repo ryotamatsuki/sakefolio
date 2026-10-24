@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BRAND_STARTERS,KIND_CONFIG,brandMatches,normalizeOffProducts,normalizeWikidataResults} from './internationalCatalog.ts';
-import {buildBackup,validateInternationalRecord} from './internationalLocal.ts';
+import {buildBackup,restoreBackup,validateInternationalRecord} from './internationalLocal.ts';
 import {analyzeInternational,filterInternationalRecords} from './internationalAnalytics.ts';
 import {chinaMasterSearch,normalizeChinaMaster,parseWktPoint,mapProducers,wikidataMatchedLocations} from './internationalMaster.ts';
 import {normalizeOverpass,normalizeOsmSnapshot} from './internationalOsm.ts';
@@ -57,7 +57,13 @@ test('unsafe URLs, embedded control chars, oversized fields rejected',()=>{
   assert.throws(()=>validateInternationalRecord(r({sourceUrl:'https://u:p@example.com/x'})),/HTTPS/);
   assert.throws(()=>validateInternationalRecord(r({productName:'a\nB'})),/確認/);
   assert.throws(()=>validateInternationalRecord(r({notes:'A'.repeat(4001)})),/確認/);
-  assert.throws(()=>validateInternationalRecord(r({attributes:{'__proto__': 'x',wrong$:'y'}})),/詳細項目/);
+  assert.throws(()=>validateInternationalRecord(r({attributes:JSON.parse('{"__proto__":"x","wrong$":"y"}')})),/詳細項目/);
+});
+test('backup restore rejects a JSON-owned __proto__ property before storage access',async()=>{
+  const payload={format:'Sakefolio-international-v1',records:[r({attributes:JSON.parse('{"__proto__":"polluted"}')})]};
+  const file=new File([JSON.stringify(payload)],'backup.json',{type:'application/json'});
+  await assert.rejects(restoreBackup(file),/詳細項目/);
+  assert.equal(({}).polluted,undefined);
 });
 
 test('Wikidata candidate search rejects invalid Q-IDs and exposes explicit CC0 source',()=>{

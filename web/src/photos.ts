@@ -1,4 +1,4 @@
-import { verifyPhoto, MAX_PHOTO_BYTES } from './security';
+import { verifyPhoto, MAX_PHOTO_BYTES } from './security.ts';
 
 /** Decode verified raster input, then persist the same portable pixels shown in preview. */
 export async function createPhotoPreview(file: File): Promise<Blob> {
@@ -41,4 +41,10 @@ export async function createPhotoPreview(file: File): Promise<Blob> {
     if (blob.size > MAX_PHOTO_BYTES) throw new Error('変換後の写真が10MBを超えています。小さい写真を選んでください。');
     return blob;
   } finally { close(); }
+}
+
+/** Re-encode before persistence so embedded EXIF/XMP metadata is not retained. */
+export async function sanitizePhotoForStorage(file: File): Promise<File> {
+  const pixels = await createPhotoPreview(file);
+  return new File([pixels], 'sakefolio-label.png', {type:'image/png'});
 }

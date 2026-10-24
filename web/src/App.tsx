@@ -6,17 +6,22 @@ import {
   Plus, Search, ShieldCheck, Star, Wine, X, BarChart3
 } from 'lucide-react';
 import type { SaveAttempt } from './google';
+import { broadcastAuthSessionSignal, listenForAuthSessionSignals, recordAuthAuditEvent } from './authSession';
+import type { AuthSessionSignal } from './authSession';
 import { validateRecordInput } from './security';
 import type { Brand, RecordEntry, StorageInfo } from './types';
 import type { BreweryCoordinate } from './breweryMapModel';
 import BreweryMap from './BreweryMap';
 import TasteDashboard from './TasteDashboard';
 import InternationalDrinks from './InternationalDrinks';
+import type {ChinaPendingSave} from './InternationalDrinks';
 import { createPhotoPreview } from './photos';
 import { breweryMapsUrl, breweryDirectionsUrl, listBreweries, HEAT_TREATMENTS, loadBrands, METHODS, PREFECTURES, STYLES, TYPES } from './catalog';
 import type { BreweryOption } from './catalog';
 import { AROMA_GROUPS, POPULAR_AROMA_IDS, SENSORY_AXES, TASTE_GROUPS, selectedIds, tagLabels, toggleIds } from './sensory';
-import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
+import { ensureStorage, getPhotoBlob, getDriveAccount, GOOGLE_CLIENT_ID, SECURITY_TEST_MODE, loadManualBrands, loadRecords, requestGoogleAccess, revokeAccess, saveRecord, inspectStorage } from './google';
+import { clearPendingSaveJournal, fingerprintAccount, fingerprintSaveInput, loadPendingSaveJournal, savePendingSaveJournal, withSaveAttemptLock } from './saveAttemptJournal';
+import type { PendingSaveJournal } from './saveAttemptJournal';
 
 type Tab = 'home' | 'explore' | 'record' | 'places' | 'insights' | 'international';
 function todayLocal(): string {
@@ -32,23 +37,24 @@ function emptyEntry(): RecordEntry {
     drinkingDate:todayLocal(),rating:'',aromaTagIds:'',tasteTagIds:'',sweetDry:'',lightRich:'',acidity:'',umami:'',notes:'',photoId:'',createdAt:''
   };
 }
-function Photo({ token, photoId, alt }: { token: string; photoId: string; alt: string }) {
+function Photo({ token, photoId, folderId, alt }: { token: string; photoId: string; folderId?:string; alt: string }) {
   const [url, setUrl] = useState('');
   const [error,setError] = useState('');
   const [retry,setRetry] = useState(0);
   useEffect(() => {
     let active = true;
+    const controller=new AbortController();
     let objectUrl = '';
     setUrl('');setError('');
     if (token && photoId) {
-      getPhotoBlob(token, photoId).then(blob => {
+      getPhotoBlob(token, photoId, folderId, controller.signal).then(blob => {
         objectUrl = URL.createObjectURL(blob);
         if (active) setUrl(objectUrl);
         else URL.revokeObjectURL(objectUrl);
       }).catch(error => { if (active) setError(error instanceof Error ? error.message : '写真の通信エラー。'); });
     }
-    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [token, photoId,retry]);
+    return () => { active = false; controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [token, photoId,folderId,retry]);
   return url ? <img className="record-photo" src={url} alt={alt} loading="lazy" onError={()=>{setUrl('');setError('画像形式を展開できません。JPEG・PNGで再登録してください。');}} /> : <div className="photo-fallback"><Wine size={30} strokeWidth={1.3}/>{error && <div role="alert">{error}<button type="button" onClick={()=>setRetry(v=>v+1)}>写真を再取得</button></div>}</div>;
 }
 function SectionEyebrow({ children }: { children: ReactNode }) {
@@ -62,6 +68,8 @@ export default function App() {
   const [manualBrands, setManualBrands] = useState<Brand[]>([]);
   const [records, setRecords] = useState<RecordEntry[]>([]);
   const [token, setToken] = useState('');
+  const tokenRef=useRef('');
+  tokenRef.current=token;
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [accountEmail, setAccountEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -75,6 +83,11 @@ export default function App() {
   const [photoBusy,setPhotoBusy] = useState(false);
   const [photoError,setPhotoError] = useState('');
   const pendingSave = useRef<{entry:RecordEntry;photo:File|null;attempt:SaveAttempt;email:string} | null>(null);
+  const pendingJournalRef=useRef<PendingSaveJournal|null>(null);
+  const [pendingJournal,setPendingJournal]=useState<PendingSaveJournal|null>(null);
+  const [journalReady,setJournalReady]=useState(!SECURITY_TEST_MODE);
+  // Keep uncertain China saves in memory across page changes and token renewal.
+  const pendingChinaSave = useRef<ChinaPendingSave|null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showAllAromas, setShowAllAromas] = useState(false);
   const [aromaSearch, setAromaSearch] = useState('');
@@ -83,6 +96,46 @@ export default function App() {
   // Invalidates outstanding requests before a disconnect or another connection.
   const session = useRef(0);
   const operation = useRef(false);
+  const sessionController=useRef<AbortController|null>(null);
+  const invalidateSession=useCallback((signal:AuthSessionSignal,eventId?:string)=>{
+    const tokenPresentBefore=Boolean(tokenRef.current);
+    const pending=pendingSave.current;
+    const pendingChina=pendingChinaSave.current;
+    session.current++;
+    sessionController.current?.abort();
+    sessionController.current=null;
+    operation.current=false;
+    tokenRef.current='';
+    recordAuthAuditEvent('session-cleared',{signal,eventId,tokenPresentBefore,tokenPresentAfter:false});
+    setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
+    setBusy(false);setMenuOpen(false);setPhotoError('');setPhotoBusy(false);
+    if(pending){
+      setEntry(pending.entry);setPhoto(pending.photo);setSelectedPhoto(pending.photo);
+    }else{
+      setPhoto(null);setEntry(emptyEntry());setSelectedPhoto(null);
+    }
+    const hasPending=Boolean(pending||pendingChina||pendingJournalRef.current);
+    setMessage(signal==='logout'
+      ? hasPending
+        ? 'Sakefolioからログアウトしました。未完了の記録は同じGoogleアカウントで再接続すると、同じ記録IDで再確認できます。'
+        : 'Sakefolioからログアウトしました。このタブのGoogle接続を終了しました。'
+      : hasPending
+        ? 'Google認証が期限切れか権限取消しされたため接続を終了しました。未完了の記録は同じGoogleアカウントで再接続してください。'
+        : 'Google認証が期限切れか権限取消しされたため接続を終了しました。再度接続してください。');
+  },[]);
+  useEffect(()=>listenForAuthSessionSignals(invalidateSession),[invalidateSession]);
+  useEffect(()=>{
+    if(!SECURITY_TEST_MODE)return;
+    let active=true;
+    void loadPendingSaveJournal().then(journal=>{
+      if(!active)return;
+      pendingJournalRef.current=journal;setPendingJournal(journal);setJournalReady(true);
+      if(journal)setMessage('前回の日本酒保存結果が未確定です。保存先が同じGoogleアカウントで、同じ記録内容と写真を再入力すると同じIDで照合・再試行できます。');
+    }).catch(error=>{
+      if(active)setMessage(error instanceof Error?error.message:'再試行情報を読み込めません。保護のため保存を停止しています。');
+    });
+    return()=>{active=false;};
+  },[]);
   const brands = useMemo(() => [...manualBrands, ...catalog], [manualBrands, catalog]);
   const breweries=useMemo(()=>listBreweries(brands,records),[brands,records]);
   const breweryMatches=useMemo(()=>{
@@ -121,38 +174,59 @@ export default function App() {
 
   const connect = async () => {
     if (operation.current) return;
+    if(SECURITY_TEST_MODE&&!journalReady){setMessage('サンドボックスの再試行情報を確認できないため、接続・保存を停止しています。ページを再読み込みしてください。');return;}
+    sessionController.current?.abort();
+    const controller=new AbortController();
+    sessionController.current=controller;
     operation.current = true;
     const current = ++session.current;
     const previousEmail = accountEmail;
-    setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
+    tokenRef.current='';setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
     setBusy(true); setMessage('');
     try {
       const accessToken = await requestGoogleAccess();
-      const account = await getDriveAccount(accessToken);
-      if (pendingSave.current && pendingSave.current.email !== account.emailAddress) {
+      controller.signal.throwIfAborted();
+      const account = await getDriveAccount(accessToken,controller.signal);
+      const retryJournal=pendingJournalRef.current;
+      if(SECURITY_TEST_MODE&&retryJournal&&retryJournal.accountHash!==await fingerprintAccount(account.emailAddress)){
+        setMessage('前回の未確定保存が別のGoogleアカウントに紐付いています。同じ本人アカウントで再接続してください。');return;
+      }
+      if ((pendingSave.current && pendingSave.current.email !== account.emailAddress) ||
+          (pendingChinaSave.current && pendingChinaSave.current.email !== account.emailAddress)) {
         setMessage('未完了の保存があります。同じGoogleアカウントで再接続してください。');return;
       }
       if (previousEmail && previousEmail !== account.emailAddress) {setEntry(emptyEntry());setSelectedPhoto(null);}
-      const myStorage = await ensureStorage(accessToken);
+      const myStorage = await ensureStorage(accessToken,controller.signal);
+      if(SECURITY_TEST_MODE&&retryJournal&&retryJournal.spreadsheetId!==myStorage.spreadsheetId){
+        setMessage('前回の未確定保存とGoogle Sheetsの保存先が一致しません。書き込みは行わず停止しました。');return;
+      }
       const [saved, added] = await Promise.all([
-        loadRecords(accessToken, myStorage),loadManualBrands(accessToken,myStorage)
+        loadRecords(accessToken, myStorage,controller.signal),loadManualBrands(accessToken,myStorage,controller.signal)
       ]);
       if (session.current !== current) return;
-      setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);
+      tokenRef.current=accessToken;setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);
       setAccountEmail(account.emailAddress);
-      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
+      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current||pendingChinaSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
     } catch (error) {
       if (session.current !== current) return;
       setMessage(error instanceof Error ? error.message : '接続に失敗しました。');
-    } finally { operation.current = false; setBusy(false); }
+    } finally { if(sessionController.current===controller){sessionController.current=null;operation.current = false; setBusy(false);} }
   };
   const disconnect = () => {
-    if (operation.current) return;
-    pendingSave.current = null;setSelectedPhoto(null);
-    ++session.current;
-    if (token) revokeAccess(token);
-    setToken('');setStorage(null);setRecords([]);setManualBrands([]);setAccountEmail('');
-    setPhoto(null);setEntry(emptyEntry());setMessage('接続を解除しました。');setMenuOpen(false);
+    const tokenToRevoke=tokenRef.current;
+    const eventId=crypto.randomUUID();
+    const revocation=tokenToRevoke?revokeAccess(tokenToRevoke,eventId):Promise.resolve({successful:false,error:'no-token'});
+    broadcastAuthSessionSignal('logout',eventId);
+    invalidateSession('logout',eventId);
+    const current=session.current;
+    void revocation.then(result=>{
+      if(session.current!==current||!tokenToRevoke)return;
+      const pendingNotice=pendingSave.current||pendingChinaSave.current||pendingJournalRef.current
+        ?' 未完了の記録があります。同じGoogleアカウントで再接続し、同じ保存ボタンで再確認してください。':'';
+      setMessage((result.successful
+        ?'Googleへの権限取り消し要求は受け付けられました。Google側で反映されるまで、別のアプリタブからのAPI読み取りが一時的に成功する場合があります。'
+        :'Sakefolioからはログアウトしましたが、Googleへの権限取り消し要求を確認できませんでした。Googleアカウントの「リンク済みアプリ」で状態を確認してください。')+pendingNotice);
+    });
   };
   const update = (field: keyof RecordEntry, value: string) => setEntry(e => ({...e, [field]:value}));
   const toggleAroma = (id: string) => setEntry(e=>({...e, aromaTagIds:toggleIds(e.aromaTagIds,id)}));
@@ -180,6 +254,7 @@ export default function App() {
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (operation.current) return;
+    if(SECURITY_TEST_MODE&&!journalReady){setMessage('サンドボックスの再試行情報を確認できないため保存できません。');return;}
     if (!token || !storage) { setMessage('保存するには先にGoogle Driveへ接続してください。'); return; }
     if (!entry.breweryName.trim() || !entry.brandName.trim() || !entry.drinkingDate || !entry.rating) {
       setMessage('酒蔵、銘柄、飲んだ日、評価を入力してください。');return;
@@ -189,16 +264,51 @@ export default function App() {
     }
     if (photoBusy || photoError) {setMessage('写真の確認が終わるまで保存できません。写真を選び直すか取り消してください。');return;}
     try {validateRecordInput(entry);} catch(error) {setMessage(error instanceof Error?error.message:'入力内容を確認してください。');return;}
-    const pending = pendingSave.current ||= {entry:{...entry},photo,attempt:{reviewId:crypto.randomUUID()},email:accountEmail};
+    const controller=new AbortController();
+    sessionController.current=controller;
     operation.current = true;
     const current = session.current;
     setBusy(true);setMessage('');
     try {
-      const reviewId = await saveRecord(token,storage,pending.entry,brands,pending.photo,pending.attempt);
+      let pending=pendingSave.current;
+      if(!pending){
+        const fingerprint=SECURITY_TEST_MODE?await fingerprintSaveInput(entry,photo):'';
+        controller.signal.throwIfAborted();
+        const journal=SECURITY_TEST_MODE?await loadPendingSaveJournal():null;
+        pendingJournalRef.current=journal;setPendingJournal(journal);
+        let attempt:SaveAttempt;
+        if(SECURITY_TEST_MODE&&journal){
+          const accountHash=await fingerprintAccount(accountEmail);
+          if(journal.accountHash!==accountHash||journal.spreadsheetId!==storage.spreadsheetId)
+            throw new Error('前回の未確定保存と接続中のアカウントまたは保存先が一致しません。安全のため保存を止めました。');
+          if(journal.fingerprint!==fingerprint)
+            throw new Error('前回の保存結果が未確定です。同じ記録内容と写真を入力して再試行するか、保存先を確認してください。');
+          attempt={...journal.attempt};
+        }else attempt={reviewId:crypto.randomUUID()};
+        pending={entry:{...entry},photo,attempt,email:accountEmail};
+        pendingSave.current=pending;
+        if(SECURITY_TEST_MODE&&!journal){
+          const accountHash=await fingerprintAccount(accountEmail);
+          const savedJournal=await savePendingSaveJournal(storage.spreadsheetId,accountHash,fingerprint,attempt);
+          pending.attempt={...savedJournal.attempt};
+          pendingJournalRef.current=savedJournal;setPendingJournal(savedJournal);
+        }
+      }
+      const persistAttempt=SECURITY_TEST_MODE?async()=>{
+        const accountHash=await fingerprintAccount(pending.email);
+        const fingerprint=await fingerprintSaveInput(pending.entry,pending.photo);
+        const savedJournal=await savePendingSaveJournal(storage.spreadsheetId,accountHash,fingerprint,pending.attempt);
+        pendingJournalRef.current=savedJournal;setPendingJournal(savedJournal);
+      }:undefined;
+      const saveOperation=()=>saveRecord(token,storage,pending.entry,brands,pending.photo,pending.attempt,controller.signal,persistAttempt);
+      const reviewId = SECURITY_TEST_MODE
+        ? await withSaveAttemptLock('sakefolio-save:'+storage.spreadsheetId+':'+pending.attempt.reviewId,saveOperation)
+        : await saveOperation();
       if (session.current !== current) return;
-      const [saved, added] = await Promise.all([loadRecords(token,storage),loadManualBrands(token,storage)]);
+      const [saved, added] = await Promise.all([loadRecords(token,storage,controller.signal),loadManualBrands(token,storage,controller.signal)]);
       if (session.current !== current) return;
       if (!saved.some(record=>record.reviewId===reviewId)) throw new Error('保存後の一覧に記録が見つかりません。同じ画面から再確認してください。');
+      if(SECURITY_TEST_MODE){await clearPendingSaveJournal();pendingJournalRef.current=null;setPendingJournal(null);}
       pendingSave.current = null;
       setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);setSelectedPhoto(null);
       setShowAdvanced(false);setShowAllAromas(false);setAromaSearch('');setTab('home');
@@ -207,7 +317,7 @@ export default function App() {
     } catch (error) {
       if (session.current !== current) return;
       setMessage((error instanceof Error ? error.message : '記録の保存に失敗しました。')+' 入力内容を保持しています。認証期限切れの場合は右上から再接続し、同じ保存ボタンを押してください。');
-    } finally {operation.current = false;setBusy(false);}
+    } finally {if(sessionController.current===controller){sessionController.current=null;operation.current = false;setBusy(false);}}
   };
   const filteredBrands = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('ja');
@@ -259,17 +369,23 @@ export default function App() {
           <button type="button" disabled={busy} onClick={connect}>Googleに再接続</button>
           <button type="button" disabled={busy} onClick={async()=>{
             if(operation.current || !storage)return;
+            const controller=new AbortController();sessionController.current=controller;
+            const current=session.current;
             operation.current=true;setBusy(true);
-            try{setMessage(await inspectStorage(token,storage));}catch(error){setMessage(error instanceof Error?error.message:'保存先を確認できません。');}
-            finally{operation.current=false;setBusy(false);}
+            try{const result=await inspectStorage(token,storage,controller.signal);if(session.current===current)setMessage(result);}
+            catch(error){if(session.current===current)setMessage(error instanceof Error?error.message:'保存先を確認できません。');}
+            finally{if(sessionController.current===controller){sessionController.current=null;operation.current=false;setBusy(false);}}
           }}>保存先の整合性を確認</button>
-          <button type="button" disabled={busy} onClick={disconnect}><LogOut size={15}/>接続を解除</button>
+          <button type="button" onClick={disconnect}><LogOut size={15}/>接続を解除</button>
         </div>}
       </div>
     </header>
 
     {message && <div role="status" className="status-banner"><span>{message}</span>
       <button type="button" aria-label="閉じる" onClick={()=>setMessage('')}><X size={17}/></button></div>}
+    {SECURITY_TEST_MODE&&pendingJournal&&<div role="status" className="status-banner">
+      前回の未確定保存を照合中です。端末には再試行ID・保存先ID・一方向ハッシュだけを保持し、記録本文・写真・認証トークンは保持しません。
+    </div>}
     {!GOOGLE_CLIENT_ID && <div className="config-notice">
       <ShieldCheck size={18}/><span>デザインプレビュー中。Google保存機能を使うにはOAuthクライアントIDの設定が必要です（README参照）。</span>
     </div>}
@@ -316,7 +432,7 @@ export default function App() {
           <div className="subheading-row"><h3>最近の記録</h3><span>{records.length ? 'NEWEST FIRST' : 'YOUR COLLECTION STARTS HERE'}</span></div>
           {records.length ? <div className="records-grid">{records.map(r => <article className="record-card" key={r.reviewId}>
             <div className="record-media">
-              {r.photoId ? <Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル'}/> : <div className="photo-fallback"><Wine size={38} strokeWidth={1.2}/></div>}
+              {r.photoId ? <Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル'}/> : <div className="photo-fallback"><Wine size={38} strokeWidth={1.2}/></div>}
               {r.rating && <div className="rating-pill"><Star size={12} fill="currentColor"/> {r.rating}</div>}
             </div>
             <div className="record-card-body"><span className="record-date">{r.drinkingDate}</span>
@@ -593,9 +709,9 @@ export default function App() {
         </form>
       </section>}
 
-      {tab==='international' && <InternationalDrinks token={token} storage={storage} onConnect={connect}/>} 
+      {tab==='international' && <InternationalDrinks key={storage?.spreadsheetId||'local'} token={token} storage={storage} accountEmail={accountEmail} pendingCloudSave={pendingChinaSave} onConnect={connect}/>}
       {tab==='insights' && <TasteDashboard records={records} loggedIn={!!token}
-        renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
+        renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
         onNewRecord={()=>goto('record')} onMap={()=>goto('places')}/>}
       {tab==='places' && <section className="page-section interior-section">
         <div className="interior-head"><SectionEyebrow>ORIGIN & TERROIR</SectionEyebrow>
@@ -605,7 +721,7 @@ export default function App() {
         {coordinateStatus==='loading'&&<p className="sake-atlas__loading" role="status">酒蔵の位置情報を読み込んでいます。</p>}
         {coordinateStatus==='error'&&<p className="sake-atlas__warning" role="alert">酒蔵の位置データを読み込めませんでした。酒蔵名からのGoogleマップ検索は利用できます。</p>}
         <BreweryMap records={records} locations={breweryCoordinates}
-          renderPhoto={r=><Photo token={token} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
+          renderPhoto={r=><Photo token={token} folderId={storage?.photoFolderId} photoId={r.photoId} alt={r.brandName+'のラベル写真'}/>}
           onRecordBrewery={g=>{
             selectBrewery({name:g.breweryName,prefecture:g.prefecture,
               municipality:'',address:g.address||g.coordinate?.address||'',count:0});

@@ -1,6 +1,7 @@
-import {detectPhotoType,verifyPhoto} from './security.ts';
+import {detectPhotoType} from './security.ts';
 import {BEVERAGE_KINDS} from './internationalCatalog.ts';
 import {validateTechnicalSpecs} from './internationalInput.ts';
+import {sanitizePhotoForStorage} from './photos.ts';
 import type {BeverageKind} from './internationalCatalog.ts';
 
 const DB='sakefolio-international-local-v1';
@@ -85,7 +86,7 @@ export async function listInternationalRecords():Promise<InternationalRecord[]>{
  return values.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
 }
 export async function saveInternationalRecord(data:InternationalRecord,photoFile:File|null):Promise<void>{
- if(photoFile){await verifyPhoto(photoFile);data.photo=photoFile;}
+ if(photoFile)data.photo=await sanitizePhotoForStorage(photoFile);
  validateInternationalRecord(data);
  // add() prevents overwriting another tasting with the same ID.
  await requestStore('readwrite',s=>s.add(data));
@@ -122,8 +123,12 @@ export async function restoreBackup(file:File):Promise<{added:number;duplicates:
  for(const raw of data.records){
    if(!isObject(raw))throw new Error('バックアップ内の形式が不正です。');
    const {photoData,photoMime,...fields}=raw;
-   const photo=typeof photoData==='string'?
+   const sourcePhoto=typeof photoData==='string'?
      decodePhoto(photoData,typeof photoMime==='string'?photoMime:''):null;
+   // Backups can contain legacy JPEGs with EXIF coordinates. Scrub before
+   // bringing any imported pixels into this browser's persistent IndexedDB.
+   const photo=sourcePhoto?await sanitizePhotoForStorage(
+     new File([sourcePhoto],'restored-label',{type:sourcePhoto.type})):null;
    const record={...fields,photo} as unknown as InternationalRecord;
    validateInternationalRecord(record);
    if(inBatch.has(record.id))throw new Error('同じ記録IDがバックアップ内に重複しています。');
