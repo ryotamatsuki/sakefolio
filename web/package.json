@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:security": "node --experimental-strip-types --test src/App.test.mjs src/security.test.mjs src/authSession.test.mjs src/saveAttemptJournal.test.mjs src/google.test.mjs src/sensory.test.mjs src/catalog.test.mjs src/geocoding.test.mjs src/breweryMapModel.test.mjs src/tasteAnalytics.test.mjs src/dashboardDrilldown.test.mjs src/international.test.mjs src/requestGate.test.mjs src/internationalCloud.test.mjs src/storageNamespace.test.mjs src/InternationalDrinks.test.mjs"
+    "test:security": "node --experimental-strip-types --test src/codeqlGate.test.mjs src/App.test.mjs src/security.test.mjs src/authSession.test.mjs src/saveAttemptJournal.test.mjs src/google.test.mjs src/sensory.test.mjs src/catalog.test.mjs src/geocoding.test.mjs src/breweryMapModel.test.mjs src/tasteAnalytics.test.mjs src/dashboardDrilldown.test.mjs src/international.test.mjs src/requestGate.test.mjs src/internationalCloud.test.mjs src/storageNamespace.test.mjs src/InternationalDrinks.test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.1",
