@@ -12,7 +12,7 @@ for(const [file,name] of [['audit-official-brewery-sites.mjs','plain'],['audit-b
     const source=readFileSync(new URL('../scripts/'+file,import.meta.url),'utf8');
     const fn=source.split('\n').find(line=>line.startsWith('function '+name+'('));
     const extract=runInNewContext(fn+';'+name);
-    assert.equal(extract('<p>visible</p><script>hidden</script ><style>secret</style\t> end').trim(),'visible end');
+    assert.equal(extract('<p>visible</p><script>hidden</script\t\n bar><style>secret</style\t ignored> end').trim(),'visible end');
   });
 }
 test('map classifier rejects lookalike OpenStreetMap hosts',()=>{

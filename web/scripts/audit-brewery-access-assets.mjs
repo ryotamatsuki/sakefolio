@@ -37,7 +37,7 @@ async function allowed(raw){
  if(!caches.has(u.origin))caches.set(u.origin,(async()=>{try{const r=await get(u.origin+'/robots.txt',500000);return robotsParser(u.origin+'/robots.txt',r.data.toString('utf8'));}catch(e){return ['HTTP_404','HTTP_410'].includes(e.message)?robotsParser(u.origin+'/robots.txt',''):null;}})());
  const parser=await caches.get(u.origin);return parser!==null&&parser.isAllowed(raw,UA)!==false;
 }
-function text(s){return String(s||'').replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/\s+/g,' ');}
+function text(s){return String(s||'').replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/\s+/g,' ');}
 function links(html,base){
  const found={pdf:[],image:[],map:[],access:[]};
  const rx=/<(?:a|img|iframe)\b[^>]{0,3000}>/gi;
