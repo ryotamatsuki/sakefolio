@@ -1,5 +1,6 @@
 // Read-only delivery audit. Never sends Google credentials or user data.
 import {createHash} from 'node:crypto';
+import {oauthClientIds} from './oauth-client-ids.mjs';
 const urls=process.argv.slice(2);
 if(!urls.length)throw Error('Pass the exact HTTPS delivery URL(s).');
 for(const input of urls){
@@ -11,7 +12,7 @@ for(const input of urls){
     if(new URL(script).origin!==url.origin){assets.push({url:script,thirdParty:true});continue;}
     const asset=await fetch(script),body=await asset.text();
     assets.push({url:script,status:asset.status,sha256:createHash('sha256').update(body).digest('hex'),
-      oauthClientIds:[...new Set(body.match(/[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com/g)||[])],
+      oauthClientIds:oauthClientIds(body),
       serviceWorkerRegistration:/serviceWorker\s*\.\s*register/.test(body),
       sandboxMarker:body.includes('SAKEFOLIO_SECURITY_TEST_20261019')});
   }

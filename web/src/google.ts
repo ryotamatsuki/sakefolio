@@ -479,7 +479,7 @@ export async function inspectStorage(token: string, storage: StorageInfo,signal?
   const files: {id:string;parents?:string[];appProperties?:Record<string,string>;shared?:boolean;permissions?:{type?:string;role?:string}[]}[] = [];
   let pageToken = '';
   do {
-    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId.replace(/'/g,"\\'")+"' in parents",fields:'nextPageToken,files(id,parents,appProperties,shared,permissions(type,role))',pageSize:'1000',...(pageToken ? {pageToken} : {})});
+    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"' in parents",fields:'nextPageToken,files(id,parents,appProperties,shared,permissions(type,role))',pageSize:'1000',...(pageToken ? {pageToken} : {})});
     const page = await api<{files:typeof files;nextPageToken?:string}>(token,'https://www.googleapis.com/drive/v3/files?'+query,{signal});
     files.push(...(page.files || []));pageToken = page.nextPageToken || '';
   } while (pageToken);

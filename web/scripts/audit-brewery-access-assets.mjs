@@ -37,7 +37,7 @@ async function allowed(raw){
  if(!caches.has(u.origin))caches.set(u.origin,(async()=>{try{const r=await get(u.origin+'/robots.txt',500000);return robotsParser(u.origin+'/robots.txt',r.data.toString('utf8'));}catch(e){return ['HTTP_404','HTTP_410'].includes(e.message)?robotsParser(u.origin+'/robots.txt',''):null;}})());
  const parser=await caches.get(u.origin);return parser!==null&&parser.isAllowed(raw,UA)!==false;
 }
-function text(s){return String(s||'').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/\s+/g,' ');}
+function text(s){return String(s||'').replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/\s+/g,' ');}
 function links(html,base){
  const found={pdf:[],image:[],map:[],access:[]};
  const rx=/<(?:a|img|iframe)\b[^>]{0,3000}>/gi;
@@ -49,7 +49,7 @@ function links(html,base){
   if(!/^https?:/.test(u.protocol))continue;
   const url=u.href;
   if(/(?:google\.[^/]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl)/i.test(u.hostname+u.pathname)){found.map.push({provider:'google',url,kind:tag.slice(0,8)});continue;}
-  if(/openstreetmap\.org/i.test(u.hostname)){found.map.push({provider:'openstreetmap',url,kind:tag.slice(0,8)});continue;}
+  if((u.hostname==='openstreetmap.org'||u.hostname.endsWith('.openstreetmap.org'))){found.map.push({provider:'openstreetmap',url,kind:tag.slice(0,8)});continue;}
   if(u.origin!==new URL(base).origin)continue;
   if(/\.pdf(?:$|\?)/i.test(url)&&/地図|アクセス|案内|access|map|交通|会社|pdf/i.test(context))found.pdf.push(url);
   if(/\.(?:png|jpg|jpeg|webp)(?:$|\?)/i.test(url)&&/地図|アクセス|案内|access|map|交通|location/i.test(context))found.image.push(url);
