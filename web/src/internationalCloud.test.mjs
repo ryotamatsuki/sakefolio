@@ -55,12 +55,16 @@ test('a cancelled China save cannot start the next Sheets request',async()=>{
   assert.equal(calls.length,1,'must stop before the header read or any write');
 });
 
-for(const mode of [false,true])for(const writeBeforeLostResponse of [false,true])test('ChinaDrinks '+(mode?'sandbox':'normal')+' retry after '+(writeBeforeLostResponse?'committed response loss':'pre-write network failure')+' reuses one photo',async()=>{
+for(const mode of [false,true])for(const fault of ['before','append-before','after','logout','timeout','upload-lost'])test('P0 ChinaDrinks '+(mode?'sandbox':'normal')+' '+fault+' retry preserves one record/photo',async()=>{
   const rows=[[...CHINA_HEADERS]];const files=new Map();let uploads=0,appends=0,failed=false;
+  const controller=new AbortController();let release,entered;const reached=new Promise(resolve=>{entered=resolve;});
   globalThis.createImageBitmap=async()=>({width:800,height:600,close(){}});
   globalThis.document={createElement(){return {getContext(){return {drawImage(){}};},toBlob(cb,type){cb(new Blob([png],{type}));}};}};
   globalThis.fetch=async(input,init={})=>{
     const url=new URL(input);
+    if(fault==='before'&&!failed&&['POST','PUT'].includes(init.method)){
+      failed=true;throw new TypeError('Controlled pre-write disconnect');
+    }
     if(url.hostname==='sheets.googleapis.com'){
       if(url.pathname==='/v4/spreadsheets/test-sheet')return new Response(JSON.stringify({sheets:[{properties:{sheetId:1,title:'ChinaDrinks'}}]}));
       if(url.pathname.includes('/values/')){
@@ -68,9 +72,11 @@ for(const mode of [false,true])for(const writeBeforeLostResponse of [false,true]
         if(range.includes(':append')){
           appends++;
           const pendingRows=JSON.parse(init.body).values;
-          if(!failed){
+          if(!failed&&['append-before','after','logout','timeout'].includes(fault)){
             failed=true;
-            if(writeBeforeLostResponse)rows.push(...pendingRows);
+            if(fault==='after'||fault==='logout')rows.push(...pendingRows);
+            if(fault==='logout'){entered();await new Promise(resolve=>{release=resolve;});return new Response('{}');}
+            if(fault==='timeout')throw new DOMException('Controlled deadline','TimeoutError');
             throw new TypeError('Network disconnected');
           }
           rows.push(...pendingRows);
@@ -89,6 +95,7 @@ for(const mode of [false,true])for(const writeBeforeLostResponse of [false,true]
       assert.deepEqual(meta.parents,['test-photos']);
       assert.equal(meta.appProperties.sakefolioApp,mode?'sakefolio-security-test-20261019-v1':'sakefolio-react-v1');
       files.set(meta.id,{...meta,mimeType:'image/png',trashed:false});uploads++;
+      if(fault==='upload-lost'&&!failed){failed=true;throw new TypeError('Controlled committed upload response loss');}
       return new Response(JSON.stringify({id:meta.id}));
     }
     if(url.hostname==='www.googleapis.com'&&url.pathname.startsWith('/drive/v3/files/')){
@@ -103,12 +110,18 @@ for(const mode of [false,true])for(const writeBeforeLostResponse of [false,true]
   const photo=new File([new Uint8Array([0xff,0xd8,0xff,...Buffer.from('EXIF-SECRET-LOCATION')])],'photo.jpg',{type:'image/jpeg'});
   const record=makeRecord();
   const saveChinaCloud=mode?sandbox.saveChinaCloud:normal.saveChinaCloud;
-  await assert.rejects(saveChinaCloud('fake-token',storage,record,photo),/通信エラー/);
+  const pending=saveChinaCloud('fake-token',storage,record,photo,controller.signal);
+  const rejected=assert.rejects(pending,fault==='logout'?{name:'AbortError'}:fault==='timeout'?/タイムアウト/:/通信エラー/);
+  if(fault==='logout'){await reached;controller.abort();release();}
+  await rejected;
+  assert.equal(rows.length-1,['after','logout'].includes(fault)?1:0);
+  assert.equal(files.size,fault==='before'?0:1);
   assert.equal(record.photoId,'reserved-photo-id');
   await saveChinaCloud('fake-token',storage,record,photo);
   assert.equal(rows.length,2);
   assert.equal(rows[1][0],record.id);
   assert.equal(rows[1][16],'reserved-photo-id');
   assert.equal(uploads,1);
-  assert.equal(appends,writeBeforeLostResponse?1:2);
+  assert.equal(appends,['append-before','timeout'].includes(fault)?2:1);
+  assert.equal(files.get(rows[1][16]).appProperties.reviewId,record.id);
 });

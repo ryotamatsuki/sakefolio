@@ -128,6 +128,7 @@ function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false
     const url=new URL(input);
     assert.match(init.headers.Authorization,/^Bearer /);
     if(url.hostname==='sheets.googleapis.com'){
+      if(!url.pathname.includes('/values/'))return json({sheets:Object.keys(tables).map(title=>({properties:{title}}))});
       const range=decodeURIComponent(url.pathname.split('/values/')[1]||'');
       const table=range.match(/^'([^']+)'/)?.[1];
       assert.ok(tables[table], 'unexpected table');
@@ -199,6 +200,47 @@ for(const afterWrite of [false,true])test('partial Reviews failure reconciles '+
   assert.equal(state.tables.Photos.length,2);
   assert.equal(state.tables.Bottles.length,2);
   assert.equal(state.writes.filter(w=>w==='Drive').length,1);
+  const saved=await google.loadRecords('renewed',storage);
+  assert.equal(saved[0].photoId,attempt.photoFileId);
+  assert.equal(state.tables.Photos[1][2],attempt.photoFileId);
+  assert.equal(state.files.get(attempt.photoFileId).appProperties.reviewId,attempt.reviewId);
+});
+
+test('P0-B1 Japanese disconnect before any mutation leaves zero rows/files and retry creates exactly one',async()=>{
+  const state=mockGoogle(),backend=globalThis.fetch,attempt={reviewId:'p0-jp-b1'};
+  let disconnected=true;
+  globalThis.fetch=async(url,init={})=>{
+    if(disconnected&&init.method==='POST')throw new TypeError('Controlled pre-write disconnect');
+    return backend(url,init);
+  };
+  await assert.rejects(google.saveRecord('fake',storage,record,[],image,attempt),/通信エラー/);
+  assert.equal(state.tables.Reviews.length-1,0);assert.equal(state.files.size,0);
+  disconnected=false;await google.saveRecord('fake',storage,record,[],image,attempt);
+  assert.equal(state.tables.Reviews.length-1,1);assert.equal(state.files.size,1);
+  assert.equal(state.tables.Reviews[1][31],state.tables.Photos[1][2]);
+});
+test('P0-B3 Japanese late committed response after logout starts no subsequent writes and reconnect reconciles',async()=>{
+  const state=mockGoogle(),backend=globalThis.fetch,attempt={reviewId:'p0-jp-b3'},controller=new AbortController();
+  let release,entered;const reached=new Promise(resolve=>{entered=resolve;});
+  globalThis.fetch=async(url,init={})=>{
+    const response=await backend(url,init);
+    if(init.method==='POST'&&String(url).includes('Bottles')){entered();await new Promise(resolve=>{release=resolve;});}
+    return response;
+  };
+  const save=google.saveRecord('old-fake',storage,record,[],image,attempt,controller.signal);
+  await reached;controller.abort();release();await assert.rejects(save,{name:'AbortError'});
+  assert.equal(state.tables.Bottles.length-1,1,'accepted write is not rolled back by logout');
+  assert.equal(state.tables.Reviews.length-1,0);assert.equal(state.files.size,0);
+  globalThis.fetch=backend;await google.saveRecord('new-fake',storage,record,[],image,attempt);
+  assert.equal(state.tables.Bottles.length-1,1);assert.equal(state.tables.Reviews.length-1,1);assert.equal(state.files.size,1);
+});
+test('P0 Japanese timeout is not success and stable attempt can retry',async()=>{
+  const state=mockGoogle(),backend=globalThis.fetch,attempt={reviewId:'p0-jp-timeout'};
+  globalThis.fetch=async()=>{throw new DOMException('Controlled deadline','TimeoutError');};
+  await assert.rejects(google.saveRecord('fake',storage,record,[],image,attempt),/タイムアウト/);
+  assert.equal(state.tables.Reviews.length-1,0);assert.equal(state.files.size,0);
+  globalThis.fetch=backend;await google.saveRecord('fake',storage,record,[],image,attempt);
+  assert.equal(state.tables.Reviews.length-1,1);assert.equal(state.files.size,1);
 });
 test('lost upload response reuses reserved Drive ID on retry',async()=>{
   const state=mockGoogle({failUpload:true});const attempt={reviewId:'retry-upload'};
@@ -268,6 +310,53 @@ test('read-only diagnostics checks photo appProperties, exact parent and sharing
   assert.match(result,/appProperties不一致 1件、親フォルダ不一致 1件、共有中 1件/);
   assert.doesNotMatch(result,/anyone|owner|different-review|other-folder/);
   assert.deepEqual(state.writes.filter(value=>value!=='Drive'),['Bottles','Photos','Reviews']);
+});
+
+const chinaDiagnosticRow=(id,photoId)=>{const row=Array(17).fill('');row[0]=id;row[16]=photoId;return row;};
+const chinaDiagnosticHeader=chinaDiagnosticRow('id','photoId');
+const ownedDiagnosticPhoto=(id,reviewId)=>({id,parents:['test-photos'],shared:false,
+  appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo',reviewId}});
+
+test('C1/C2/C6 diagnostic reconciles Japanese and historical ChinaDrinks photo references without writes',async()=>{
+  const state=mockGoogle();
+  await google.saveRecord('fake',storage,record,[],image,{reviewId:'jp-review'});
+  state.tables.ChinaDrinks=[chinaDiagnosticHeader,chinaDiagnosticRow('china-review','china-photo')];
+  state.files.set('china-photo',ownedDiagnosticPhoto('china-photo','china-review'));
+  const before=JSON.stringify({tables:state.tables,files:[...state.files]});const writes=state.writes.length;
+  const result=await google.inspectStorage('fake',storage);
+  assert.match(result,/中国酒記録 1件/);
+  assert.match(result,/写真ファイル不足 0件、未紐付け画像 0件、appProperties不一致 0件/);
+  assert.match(result,/写真参照不正 0件/);
+  assert.equal(JSON.stringify({tables:state.tables,files:[...state.files]}),before);
+  assert.equal(state.writes.length,writes);
+});
+test('C3 true orphan is reported without hiding a valid China photo',async()=>{
+  const state=mockGoogle();state.tables.ChinaDrinks=[chinaDiagnosticHeader,chinaDiagnosticRow('china-review','china-photo')];
+  state.files.set('china-photo',ownedDiagnosticPhoto('china-photo','china-review'));
+  state.files.set('orphan-photo',ownedDiagnosticPhoto('orphan-photo','unfinished-review'));
+  assert.match(await google.inspectStorage('fake',storage),/未紐付け画像 1件、appProperties不一致 0件/);
+  assert.deepEqual(state.writes,[]);
+});
+test('C4 missing and invalid China photo references cannot appear healthy',async()=>{
+  const state=mockGoogle();state.tables.ChinaDrinks=[chinaDiagnosticHeader,
+    chinaDiagnosticRow('china-missing','missing-photo'),chinaDiagnosticRow('china-invalid','../unsafe')];
+  const result=await google.inspectStorage('fake',storage);
+  assert.match(result,/写真ファイル不足 1件/);assert.match(result,/写真参照不正 1件/);
+  assert.deepEqual(state.writes,[]);
+});
+test('C5 multiple references are deduplicated but conflicting record ownership is rejected',async()=>{
+  const state=mockGoogle();state.tables.ChinaDrinks=[chinaDiagnosticHeader,
+    chinaDiagnosticRow('china-review','shared-photo'),chinaDiagnosticRow('other-review','shared-photo')];
+  state.files.set('shared-photo',ownedDiagnosticPhoto('shared-photo','china-review'));
+  assert.match(await google.inspectStorage('fake',storage),/未紐付け画像 0件、appProperties不一致 1件/);
+  state.tables.ChinaDrinks.pop();
+  state.tables.Photos.push(['photo-row','china-review','shared-photo']);
+  assert.match(await google.inspectStorage('fake',storage),/appProperties不一致 0件/);
+});
+test('diagnostic refuses malformed China photo schema instead of reporting a clean store',async()=>{
+  const state=mockGoogle();state.tables.ChinaDrinks=[['wrong','header']];
+  await assert.rejects(google.inspectStorage('fake',storage),/写真参照列/);
+  assert.deepEqual(state.writes,[]);
 });
 
 test('preview normalizes HEIC using Safari image fallback and closes object URL',async()=>{

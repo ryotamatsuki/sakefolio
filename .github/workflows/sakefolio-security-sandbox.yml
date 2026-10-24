@@ -60,7 +60,7 @@ jobs:
           for(const marker of ['SAKEFOLIO_SECURITY_TEST_20261019','sakefolio-security-test-20261019-v1','sakefolio-security-test-20261019-international-local-v1']) {
             if(!bundle.includes(marker)) throw Error('Sandbox marker missing: '+marker);
           }
-          writeFileSync('dist/security-sandbox-build.json',JSON.stringify({mode:'security-test-20261019',sourceCommit:process.env.GITHUB_SHA,securitySource:'4b0ff36e4e4c1679aa0a4c2cc81ebb0b08468571',publicSource:'13a7a709dc8057e6e1142716e69c7906c0d14699',driveFolder:'SAKEFOLIO_SECURITY_TEST_20261019',localDatabase:'sakefolio-security-test-20261019-international-local-v1'}));
+          writeFileSync('dist/security-sandbox-build.json',JSON.stringify({mode:'security-test-20261019',sourceCommit:process.env.GITHUB_SHA,securitySource:'3f297113415f8011c5d984e2e2dbac7955ab1683',publicSource:'13a7a709dc8057e6e1142716e69c7906c0d14699',driveFolder:'SAKEFOLIO_SECURITY_TEST_20261019',localDatabase:'sakefolio-security-test-20261019-international-local-v1'}));
           JS
       - name: Rebuild existing public version unchanged
         working-directory: public-source/web
@@ -100,6 +100,9 @@ jobs:
       - uses: github/codeql-action/analyze@v4
         with:
           category: sakefolio-security-sandbox
+          output: codeql-results
+      - name: Reject current High or Critical CodeQL findings
+        run: node .github/scripts/check-codeql-sarif.mjs codeql-results
 
   deploy:
     needs: [build, codeql]

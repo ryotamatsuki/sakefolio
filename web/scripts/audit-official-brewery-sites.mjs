@@ -42,7 +42,7 @@ async function allowed(url){
  const p=await robots.get(u.origin);
  return p!==null&&p.isAllowed(url,UA)!==false;
 }
-function plain(html){return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').slice(0,100000);}
+function plain(html){return html.replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').slice(0,100000);}
 function geo(html){
  const coords=[];
  for(const m of html.matchAll(/<meta\b[^>]{0,1000}>/gi)){
@@ -52,7 +52,7 @@ function geo(html){
   const a=v.match(/(-?\d{1,2}\.\d+)\s*[,; ]\s*(-?\d{2,3}\.\d+)/);
   if(a)coords.push({lat:+a[1],lon:+a[2],kind:'first_party_meta'});
  }
- for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){
+ for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)){
   try{
    const obj=JSON.parse(m[1]);
    const walk=(x,depth=0)=>{

@@ -453,28 +453,48 @@ export async function saveRecord(
 /** Read-only diagnostics. Never delete/overwrite existing data to repair a partial save. */
 export async function inspectStorage(token: string, storage: StorageInfo,signal?:AbortSignal): Promise<string> {
   const [reviews,photos,bottles] = await Promise.all(['Reviews','Photos','Bottles'].map(table=>getRows(token,storage.spreadsheetId,table,undefined,signal)));
+  // ChinaDrinks is optional. Inspect its presence without creating or repairing it.
+  const sheetMeta=await api<{sheets?:{properties?:{title?:string}}[]}>(token,
+    'https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(storage.spreadsheetId)+'?fields=sheets(properties(title))',{signal});
+  const china=sheetMeta.sheets?.some(sheet=>sheet.properties?.title==='ChinaDrinks')
+    ? await getRows(token,storage.spreadsheetId,'ChinaDrinks','A1:Q',signal):[];
+  if(china.length&&(china[0][0]!=='id'||china[0][16]!=='photoId'))
+    throw new Error('ChinaDrinksの写真参照列を確認できません。診断を中止しました。');
   const reviewIds = new Set(reviews.slice(1).map(r=>r[0]).filter(Boolean));
   const usedBottles = new Set(reviews.slice(1).map(r=>r[2]));
   const photoLinks = photos.slice(1).filter(r=>r[0]);
-  const photoIds = new Set(photoLinks.map(r=>r[2]));
+  const chinaRecords=china.slice(1).filter(row=>row.some(Boolean));
+  const references=[...photoLinks.map(row=>({fileId:row[2],recordId:row[1]})),
+    ...reviews.slice(1).filter(row=>row[31]).map(row=>({fileId:row[31],recordId:row[0]})),
+    ...chinaRecords.filter(row=>row[16]).map(row=>({fileId:row[16],recordId:row[0]}))];
+  const validId=(id:string|undefined)=>!!id&&/^[A-Za-z0-9_-]{1,200}$/.test(id);
+  const invalidReferences=references.filter(ref=>!validId(ref.fileId)||!validId(ref.recordId)).length;
+  const linkedRecordsByPhoto=new Map<string,Set<string>>();
+  for(const ref of references){
+    if(!validId(ref.fileId)||!validId(ref.recordId))continue;
+    const records=linkedRecordsByPhoto.get(ref.fileId)||new Set<string>();
+    records.add(ref.recordId);linkedRecordsByPhoto.set(ref.fileId,records);
+  }
+  const photoIds = new Set(linkedRecordsByPhoto.keys());
   const files: {id:string;parents?:string[];appProperties?:Record<string,string>;shared?:boolean;permissions?:{type?:string;role?:string}[]}[] = [];
   let pageToken = '';
   do {
-    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId.replace(/'/g,"\\'")+"' in parents",fields:'nextPageToken,files(id,parents,appProperties,shared,permissions(type,role))',pageSize:'1000',...(pageToken ? {pageToken} : {})});
+    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"' in parents",fields:'nextPageToken,files(id,parents,appProperties,shared,permissions(type,role))',pageSize:'1000',...(pageToken ? {pageToken} : {})});
     const page = await api<{files:typeof files;nextPageToken?:string}>(token,'https://www.googleapis.com/drive/v3/files?'+query,{signal});
     files.push(...(page.files || []));pageToken = page.nextPageToken || '';
   } while (pageToken);
   const fileIds = new Set(files.map(f=>f.id));
-  const missing = photoLinks.filter(r=>!fileIds.has(r[2])).length;
+  const missing = [...photoIds].filter(id=>!fileIds.has(id)).length;
   const orphan = files.filter(f=>!photoIds.has(f.id)).length;
-  const linkedReviewByPhoto=new Map(photoLinks.map(row=>[row[2],row[1]]));
   const markerMismatch=files.filter(file=>file.appProperties?.sakefolioApp!==APP_MARKER||
-    file.appProperties?.sakefolioKind!=='photo'||file.appProperties?.reviewId!==linkedReviewByPhoto.get(file.id)).length;
+    file.appProperties?.sakefolioKind!=='photo'||
+    (linkedRecordsByPhoto.has(file.id)&&(linkedRecordsByPhoto.get(file.id)!.size!==1||
+      !linkedRecordsByPhoto.get(file.id)!.has(file.appProperties?.reviewId||'')))).length;
   const wrongParent=files.filter(file=>!file.parents?.includes(storage.photoFolderId)).length;
   const shared=files.filter(file=>file.shared===true||file.permissions?.some(permission=>permission.role!=='owner')).length;
   const sharingUnknown=files.filter(file=>file.shared===undefined).length;
   const incomplete = photoLinks.filter(r=>!reviewIds.has(r[1])).length;
   const missingLinks = reviews.slice(1).filter(r=>r[31] && !photoLinks.some(p=>p[1]===r[0] && p[2]===r[31])).length;
   const unusedBottles = bottles.slice(1).filter(r=>r[0] && !usedBottles.has(r[0])).length;
-  return '保存先確認：記録 '+reviewIds.size+'件、写真情報 '+photoLinks.length+'件。写真ファイル不足 '+missing+'件、未紐付け画像 '+orphan+'件、appProperties不一致 '+markerMismatch+'件、親フォルダ不一致 '+wrongParent+'件、共有中 '+shared+'件、共有状態不明 '+sharingUnknown+'件、記録未完了の写真情報 '+incomplete+'件、写真情報不足 '+missingLinks+'件、未紐付け商品 '+unusedBottles+'件。データは変更していません。';
+  return '保存先確認：記録 '+reviewIds.size+'件、中国酒記録 '+chinaRecords.length+'件、写真情報 '+photoLinks.length+'件。写真ファイル不足 '+missing+'件、未紐付け画像 '+orphan+'件、appProperties不一致 '+markerMismatch+'件、親フォルダ不一致 '+wrongParent+'件、共有中 '+shared+'件、共有状態不明 '+sharingUnknown+'件、記録未完了の写真情報 '+incomplete+'件、写真情報不足 '+missingLinks+'件、写真参照不正 '+invalidReferences+'件、未紐付け商品 '+unusedBottles+'件。データは変更していません。';
 }

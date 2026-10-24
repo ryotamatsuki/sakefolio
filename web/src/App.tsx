@@ -222,9 +222,11 @@ export default function App() {
     const current=session.current;
     void revocation.then(result=>{
       if(session.current!==current||!tokenToRevoke)return;
-      setMessage(result.successful
+      const pendingNotice=pendingSave.current||pendingChinaSave.current||pendingJournalRef.current
+        ?' 未完了の記録があります。同じGoogleアカウントで再接続し、同じ保存ボタンで再確認してください。':'';
+      setMessage((result.successful
         ?'Googleへの権限取り消し要求は受け付けられました。Google側で反映されるまで、別のアプリタブからのAPI読み取りが一時的に成功する場合があります。'
-        :'Sakefolioからはログアウトしましたが、Googleへの権限取り消し要求を確認できませんでした。Googleアカウントの「リンク済みアプリ」で状態を確認してください。');
+        :'Sakefolioからはログアウトしましたが、Googleへの権限取り消し要求を確認できませんでした。Googleアカウントの「リンク済みアプリ」で状態を確認してください。')+pendingNotice);
     });
   };
   const update = (field: keyof RecordEntry, value: string) => setEntry(e => ({...e, [field]:value}));
