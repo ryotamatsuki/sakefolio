@@ -51,6 +51,8 @@ test('China retry preserves the same draft, record ID and photo ID across reauth
   const draft={current:null};let tree=await mount(draft);
   try{
     await fill(tree);await submit(tree);
+    assert.match(JSON.stringify(tree.toJSON()),/HTTP 401/);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()),/Google Sheetsに保存し、読み戻して確認しました/);
     const original=saved[0].record;
     await act(async()=>tree.unmount());tree=await mount(draft);
     assert.equal(tree.root.findByProps({placeholder:'正式な商品名'}).props.value,'same product');
@@ -58,6 +60,24 @@ test('China retry preserves the same draft, record ID and photo ID across reauth
     assert.equal(saved[1].record.id,original.id);
     assert.equal(saved[1].record.photoId,'reserved-photo-id');
     assert.equal(draft.current,null);
+    assert.match(JSON.stringify(tree.toJSON()),/Google Sheetsに保存し、読み戻して確認しました/);
+  }finally{await act(async()=>tree.unmount());}
+});
+
+test('P0-B3 China logout/reconnect ignores late completion and keeps the uncertain record',async()=>{
+  const draft={current:null},tree=await mount(draft);let pending;
+  try{
+    await fill(tree);finishSave={};failSave=false;
+    await act(async()=>{pending=tree.root.findByType('form').props.onSubmit({preventDefault(){}});});
+    const original=draft.current.record;
+    await act(async()=>tree.update(React.createElement(InternationalDrinks,{...props(draft),token:'',storage:null,accountEmail:''})));
+    assert.equal(saved[0].signal.aborted,true);
+    await act(async()=>tree.update(React.createElement(InternationalDrinks,{...props(draft),token:'new-fake'})));
+    const before=JSON.stringify(tree.toJSON());
+    await act(async()=>{finishSave.resolve();await pending;});
+    assert.equal(JSON.stringify(tree.toJSON()),before);
+    assert.equal(draft.current.record,original);
+    assert.doesNotMatch(JSON.stringify(tree.toJSON()),/Google Sheetsに保存し、読み戻して確認しました/);
   }finally{await act(async()=>tree.unmount());}
 });
 
