@@ -343,6 +343,8 @@ export async function saveRecord(
 
 /** Read-only diagnostics. Never delete/overwrite existing data to repair a partial save. */
 export async function inspectStorage(token: string, storage: StorageInfo): Promise<string> {
+  if (!/^[A-Za-z0-9_-]{1,512}$/.test(storage.photoFolderId))
+    throw new Error('保存先の写真フォルダIDが不正です。');
   const [reviews,photos,bottles] = await Promise.all(['Reviews','Photos','Bottles'].map(table=>getRows(token,storage.spreadsheetId,table)));
   const reviewIds = new Set(reviews.slice(1).map(r=>r[0]).filter(Boolean));
   const usedBottles = new Set(reviews.slice(1).map(r=>r[2]));
@@ -351,7 +353,7 @@ export async function inspectStorage(token: string, storage: StorageInfo): Promi
   const files: {id:string}[] = [];
   let pageToken = '';
   do {
-    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId.replace(/'/g,"\\'")+"' in parents",fields:'nextPageToken,files(id)',pageSize:'1000',...(pageToken ? {pageToken} : {})});
+    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId+"' in parents",fields:'nextPageToken,files(id)',pageSize:'1000',...(pageToken ? {pageToken} : {})});
     const page = await api<{files:{id:string}[];nextPageToken?:string}>(token,'https://www.googleapis.com/drive/v3/files?'+query);
     files.push(...(page.files || []));pageToken = page.nextPageToken || '';
   } while (pageToken);

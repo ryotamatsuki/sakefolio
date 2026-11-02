@@ -1,0 +1,59 @@
+name: Sakefolio CodeQL security-zero and regression suite
+on:
+  pull_request:
+  push:
+    branches: [test/sakefolio-pages-preview, security/sakefolio-codeql-zero-20261102]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: npm run test:security
+        working-directory: web
+      - run: npm run test:html-audit
+        working-directory: web
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript
+      - name: Require zero CodeQL security-severity findings
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const file='../results/javascript.sarif';
+          if(!fs.existsSync(file))throw Error('SARIF missing');
+          const sarif=JSON.parse(fs.readFileSync(file,'utf8'));
+          if(!Array.isArray(sarif.runs)||!sarif.runs.length)throw Error('No SARIF runs');
+          const findings=[],unclassified=[];
+          for(const run of sarif.runs){
+            const rules=[run.tool?.driver,...(run.tool?.extensions||[])].filter(Boolean).flatMap(c=>c.rules||[]);
+            for(const result of run.results||[]){
+              const rule=rules.find(r=>r.id===result.ruleId);
+              if(!rule){unclassified.push(result.ruleId);continue;}
+              const score=Number(rule.properties?.['security-severity']??0);
+              if(score>0)findings.push({rule:result.ruleId,score,file:result.locations?.[0]?.physicalLocation?.artifactLocation?.uri});
+            }
+          }
+          console.log(JSON.stringify({securityFindings:findings.length,unclassified,findings:findings.slice(0,30)},null,2));
+          if(findings.length||unclassified.length)process.exitCode=1;
+          NODE

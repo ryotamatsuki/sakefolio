@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import robotsParser from 'robots-parser';
+import {parseDocument,elements,attribute,visibleText,rawScriptText,plainHtmlText} from './html-audit-utils.mjs';
 const targets=JSON.parse(await fs.readFile('data/brewery-official-site-targets.json','utf8'));
 const previous=JSON.parse(await fs.readFile('public/brewery-coordinates.json','utf8'));
 const prior=new Map(previous.map(p=>[p.breweryName+'|'+p.prefecture,p]));
@@ -42,37 +43,44 @@ async function allowed(url){
  const p=await robots.get(u.origin);
  return p!==null&&p.isAllowed(url,UA)!==false;
 }
-function plain(html){return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').slice(0,100000);}
+function plain(html){return plainHtmlText(html,100000);}
 function geo(html){
- const coords=[];
- for(const m of html.matchAll(/<meta\b[^>]{0,1000}>/gi)){
-  const s=m[0],key=(s.match(/\b(?:name|property)=["']([^"']+)["']/i)||[])[1]||'';
-  if(!/^(geo\.position|icbm)$/i.test(key))continue;
-  const v=(s.match(/\bcontent=["']([^"']+)["']/i)||[])[1]||'';
-  const a=v.match(/(-?\d{1,2}\.\d+)\s*[,; ]\s*(-?\d{2,3}\.\d+)/);
-  if(a)coords.push({lat:+a[1],lon:+a[2],kind:'first_party_meta'});
- }
- for(const m of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){
-  try{
-   const obj=JSON.parse(m[1]);
-   const walk=(x,depth=0)=>{
-    if(!x||typeof x!=='object'||depth>8)return;
-    if(Array.isArray(x)){for(const v of x)walk(v,depth+1);return;}
-    const g=x.geo||(/GeoCoordinates/i.test(String(x['@type']||''))?x:null);
-    if(g&&typeof g==='object'&&Number.isFinite(Number(g.latitude))&&Number.isFinite(Number(g.longitude)))
-      coords.push({lat:+g.latitude,lon:+g.longitude,kind:'first_party_jsonld',associatedName:String(x.name||'').slice(0,100)});
-    for(const [k,v]of Object.entries(x))if(k!=='geo'&&v&&typeof v==='object')walk(v,depth+1);
-   };walk(obj);
-  }catch{}
- }
- return coords.filter(x=>x.lat>=20&&x.lat<=47&&x.lon>=122&&x.lon<=154);
+  const root=parseDocument(html), coords=[];
+  for(const meta of elements(root,'meta')){
+    const key=attribute(meta,'name')||attribute(meta,'property');
+    if(!/^(geo\.position|icbm)$/i.test(key))continue;
+    const v=attribute(meta,'content');
+    const a=v.match(/(-?\d{1,2}\.\d+)\s*[,; ]\s*(-?\d{2,3}\.\d+)/);
+    if(a)coords.push({lat:+a[1],lon:+a[2],kind:'first_party_meta'});
+  }
+  for(const script of elements(root,'script')){
+    if(attribute(script,'type').toLowerCase()!=='application/ld+json')continue;
+    try{
+      const obj=JSON.parse(rawScriptText(script));
+      const walk=(x,depth=0)=>{
+        if(!x||typeof x!=='object'||depth>8)return;
+        if(Array.isArray(x)){for(const v of x)walk(v,depth+1);return;}
+        const g=x.geo||(/GeoCoordinates/i.test(String(x['@type']||''))?x:null);
+        if(g&&typeof g==='object'&&Number.isFinite(Number(g.latitude))&&Number.isFinite(Number(g.longitude)))
+          coords.push({lat:+g.latitude,lon:+g.longitude,kind:'first_party_jsonld',associatedName:String(x.name||'').slice(0,100)});
+        for(const [k,v] of Object.entries(x))if(k!=='geo'&&v&&typeof v==='object')walk(v,depth+1);
+      };walk(obj);
+    }catch{}
+  }
+  return coords.filter(x=>x.lat>=20&&x.lat<=47&&x.lon>=122&&x.lon<=154);
 }
 function access(html,base){
- for(const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)){
-  if(!/(access|アクセス|会社概要|所在地|交通案内|company|about|location)/i.test(m[1]+' '+plain(m[2])))continue;
-  try{const u=new URL(m[1].replace(/&amp;/g,'&'),base);if(u.origin===new URL(base).origin&&/^https?:/.test(u.protocol)&&!/\.(pdf|jpg|png)$/i.test(u.pathname))return u.href;}catch{}
- }
- return null;
+  for(const a of elements(parseDocument(html),'a')){
+    const raw=attribute(a,'href');
+    if(!raw||raw.startsWith('#'))continue;
+    const label=visibleText(a).replace(/\s+/g,' ');
+    if(!/(access|アクセス|会社概要|所在地|交通案内|company|about|location)/i.test(raw+' '+label))continue;
+    try{
+      const u=new URL(raw,base);
+      if(u.origin===new URL(base).origin&&['http:','https:'].includes(u.protocol)&&!/\.(pdf|jpg|png)$/i.test(u.pathname))return u.href;
+    }catch{}
+  }
+  return null;
 }
 function distKm(a,b,c,d){const r=Math.PI/180,v=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;return 12742*Math.asin(Math.min(1,Math.sqrt(v)));}
 async function inspect(t){
