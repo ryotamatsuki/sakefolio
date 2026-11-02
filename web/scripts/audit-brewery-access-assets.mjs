@@ -6,6 +6,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import robotsParser from 'robots-parser';
+import {parseDocument,elements,attribute,visibleText,plainHtmlText} from './html-audit-utils.mjs';
 const exec=promisify(execFile);
 const prior=JSON.parse(await fs.readFile('data/brewery-official-site-audit.json','utf8'));
 const targets=JSON.parse(await fs.readFile('data/brewery-official-site-targets.json','utf8'));
@@ -37,26 +38,33 @@ async function allowed(raw){
  if(!caches.has(u.origin))caches.set(u.origin,(async()=>{try{const r=await get(u.origin+'/robots.txt',500000);return robotsParser(u.origin+'/robots.txt',r.data.toString('utf8'));}catch(e){return ['HTTP_404','HTTP_410'].includes(e.message)?robotsParser(u.origin+'/robots.txt',''):null;}})());
  const parser=await caches.get(u.origin);return parser!==null&&parser.isAllowed(raw,UA)!==false;
 }
-function text(s){return String(s||'').replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/\s+/g,' ');}
+function text(s){return plainHtmlText(s);}
 function links(html,base){
- const found={pdf:[],image:[],map:[],access:[]};
- const rx=/<(?:a|img|iframe)\b[^>]{0,3000}>/gi;
- for(const match of html.matchAll(rx)){
-  const tag=match[0],raw=(tag.match(/\b(?:href|src)=["']([^"']+)["']/i)||[])[1];if(!raw)continue;
-  const label=(tag.match(/\b(?:alt|title)=["']([^"']+)["']/i)||[])[1]||'';
-  const context=tag+' '+label;
-  let u;try{u=new URL(raw.replace(/&amp;/g,'&'),base);}catch{continue;}
-  if(!/^https?:/.test(u.protocol))continue;
-  const url=u.href;
-  if(/(?:google\.[^/]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl)/i.test(u.hostname+u.pathname)){found.map.push({provider:'google',url,kind:tag.slice(0,8)});continue;}
-  if((u.hostname==='openstreetmap.org'||u.hostname.endsWith('.openstreetmap.org'))){found.map.push({provider:'openstreetmap',url,kind:tag.slice(0,8)});continue;}
-  if(u.origin!==new URL(base).origin)continue;
-  if(/\.pdf(?:$|\?)/i.test(url)&&/地図|アクセス|案内|access|map|交通|会社|pdf/i.test(context))found.pdf.push(url);
-  if(/\.(?:png|jpg|jpeg|webp)(?:$|\?)/i.test(url)&&/地図|アクセス|案内|access|map|交通|location/i.test(context))found.image.push(url);
-  if(/access|アクセス|交通案内|所在地|会社概要|company|location/i.test(context)&&!/\.(?:pdf|png|jpg|jpeg|webp)/i.test(url))found.access.push(url);
- }
- for(const key of Object.keys(found))found[key]=[...new Map(found[key].map(x=>[typeof x==='string'?x:x.url,x])).values()].slice(0,8);
- return found;
+  const found={pdf:[],image:[],map:[],access:[]};
+  for(const node of elements(parseDocument(html))){
+    if(!['a','img','iframe'].includes(node.tagName))continue;
+    const raw=attribute(node,'href')||attribute(node,'src');
+    if(!raw)continue;
+    const label=attribute(node,'alt')||attribute(node,'title');
+    const context=raw+' '+label+' '+visibleText(node);
+    let u;try{u=new URL(raw,base);}catch{continue;}
+    if(!['http:','https:'].includes(u.protocol))continue;
+    const url=u.href,kind=node.tagName;
+    const googleMaps=(u.hostname==='maps.google.com'||u.hostname==='maps.app.goo.gl'||
+      (u.hostname==='goo.gl'&&u.pathname.startsWith('/maps'))||
+      (u.hostname.startsWith('google.')&&u.pathname.startsWith('/maps')));
+    if(googleMaps){found.map.push({provider:'google',url,kind});continue;}
+    if(u.hostname==='openstreetmap.org'||u.hostname.endsWith('.openstreetmap.org')){
+      found.map.push({provider:'openstreetmap',url,kind});continue;
+    }
+    if(u.origin!==new URL(base).origin)continue;
+    if(/\.pdf(?:$|\?)/i.test(url)&&/地図|アクセス|案内|access|map|交通|会社|pdf/i.test(context))found.pdf.push(url);
+    if(/\.(?:png|jpg|jpeg|webp)(?:$|\?)/i.test(url)&&/地図|アクセス|案内|access|map|交通|location/i.test(context))found.image.push(url);
+    if(/access|アクセス|交通案内|所在地|会社概要|company|location/i.test(context)&&!/\.(?:pdf|png|jpg|jpeg|webp)/i.test(url))found.access.push(url);
+  }
+  for(const key of Object.keys(found))
+    found[key]=[...new Map(found[key].map(x=>[typeof x==='string'?x:x.url,x])).values()].slice(0,8);
+  return found;
 }
 function addressEvidence(content,target){
  const clean=s=>String(s||'').normalize('NFKC').replace(/\s+/g,'').replace(/[ー－‐–—−]/g,'-');
