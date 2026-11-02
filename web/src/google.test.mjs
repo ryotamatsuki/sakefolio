@@ -14,6 +14,22 @@ const realFetch = globalThis.fetch;
 const json = (body, status=200) => new Response(JSON.stringify(body), {status});
 test.afterEach(() => { globalThis.fetch = realFetch; delete globalThis.window; });
 
+// A Drive query must not be constructed from untrusted folder identifiers.
+test('storage inspection rejects malformed Drive folder IDs before any network access', async () => {
+  let networkCalls = 0;
+  globalThis.fetch = async () => {networkCalls++;throw new Error('unexpected network');};
+  await assert.rejects(
+    google.inspectStorage('dummy-token', {spreadsheetId:'test-sheet',folderId:'root',photoFolderId:"abc' or trashed = false"}),
+    /写真フォルダIDが不正/
+  );
+  await assert.rejects(
+    google.inspectStorage('dummy-token', {spreadsheetId:'test-sheet',folderId:'root',photoFolderId:'folder\\backslash'}),
+    /写真フォルダIDが不正/
+  );
+  assert.equal(networkCalls, 0);
+});
+
+
 const previewSource = readFileSync(new URL('./photos.ts',import.meta.url),'utf8')
   .replace("from './security'", `from '${securityUrl}'`);
 const previewCompiled = ts.transpileModule(previewSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
