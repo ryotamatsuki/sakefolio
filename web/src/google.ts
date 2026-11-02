@@ -452,6 +452,8 @@ export async function saveRecord(
 
 /** Read-only diagnostics. Never delete/overwrite existing data to repair a partial save. */
 export async function inspectStorage(token: string, storage: StorageInfo,signal?:AbortSignal): Promise<string> {
+  if (!/^[A-Za-z0-9_-]{1,512}$/.test(storage.photoFolderId))
+    throw new Error('保存先の写真フォルダIDが不正です。');
   const [reviews,photos,bottles] = await Promise.all(['Reviews','Photos','Bottles'].map(table=>getRows(token,storage.spreadsheetId,table,undefined,signal)));
   // ChinaDrinks is optional. Inspect its presence without creating or repairing it.
   const sheetMeta=await api<{sheets?:{properties?:{title?:string}}[]}>(token,
@@ -479,7 +481,7 @@ export async function inspectStorage(token: string, storage: StorageInfo,signal?
   const files: {id:string;parents?:string[];appProperties?:Record<string,string>;shared?:boolean;permissions?:{type?:string;role?:string}[]}[] = [];
   let pageToken = '';
   do {
-    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"' in parents",fields:'nextPageToken,files(id,parents,appProperties,shared,permissions(type,role))',pageSize:'1000',...(pageToken ? {pageToken} : {})});
+    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId+"' in parents",fields:'nextPageToken,files(id,parents,appProperties,shared,permissions(type,role))',pageSize:'1000',...(pageToken ? {pageToken} : {})});
     const page = await api<{files:typeof files;nextPageToken?:string}>(token,'https://www.googleapis.com/drive/v3/files?'+query,{signal});
     files.push(...(page.files || []));pageToken = page.nextPageToken || '';
   } while (pageToken);
