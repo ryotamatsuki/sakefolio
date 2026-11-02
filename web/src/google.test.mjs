@@ -457,3 +457,14 @@ test('OAuth revoke never reports success if GIS callback does not arrive',async(
   assert.equal(result.error,'timeout');
  }finally{globalThis.setTimeout=old;}
 });
+
+
+test('inspectStorage rejects unsafe Drive folder identifiers before reading Google APIs',async()=>{
+ let networkCalls=0;
+ globalThis.fetch=async()=>{networkCalls++;throw Error('unexpected API call')};
+ const base={spreadsheetId:'test-sheet',folderId:'test-root',photoFolderId:"foo' or trashed = false"};
+ await assert.rejects(google.inspectStorage('fake-token',base),/写真フォルダIDが不正/);
+ await assert.rejects(google.inspectStorage('fake-token',{...base,photoFolderId:'folder\\slash'}),/写真フォルダIDが不正/);
+ assert.equal(networkCalls,0);
+});
+
