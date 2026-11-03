@@ -1,0 +1,587 @@
+import type { Brand, RecordEntry, RevocationResponse, StorageInfo, TokenResponse } from './types';
+import { detectPhotoType, validateRecordInput, verifyPhoto } from './security';
+import { configureSecurityAudit, notifyAuthSessionSignal, recordAuthAuditEvent } from './authSession';
+
+/**
+ * The only OAuth scope requested. No refresh token, client secret, or user file
+ * contents are stored on our servers. Access tokens live only in React memory.
+ */
+export const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+// Opt-in, build-time-only sandbox for real-account testing. Never enable on normal builds.
+export const SECURITY_TEST_MODE = import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019';
+configureSecurityAudit(SECURITY_TEST_MODE);
+const STORAGE_FOLDER_NAME = SECURITY_TEST_MODE ? 'SAKEFOLIO_SECURITY_TEST_20261019' : 'Sakefolio';
+const STORAGE_SHEET_NAME = SECURITY_TEST_MODE ? 'SAKEFOLIO_SECURITY_TEST_20261019_Data' : 'Sakefolio_Data';
+
+const TABLE_HEADERS: Record<string, string[]> = {
+  Brands: ['brandId','brandName','breweryName','prefecture','breweryId','areaId','source','sakenowaBrandId','createdAt','updatedAt','municipality','breweryAddress'],
+  Bottles: ['bottleId','brandId','productName','sakeType','processingStyle','riceVariety','polishingRatio','alcoholPercent','vintage','notes','createdAt','updatedAt','sakeTypeOther','brewingMethod','heatTreatment'],
+  Reviews: ['reviewId','brandId','bottleId','drinkingDate','rating','aromaTagIds','tasteTagIds','sweetDry','lightRich','acidity','umami','comment','drinkingPlace','priceJPY','createdAt','updatedAt','brandName','breweryName','prefecture','municipality','breweryAddress','productName','sakeType','sakeTypeOther','brewingMethod','heatTreatment','processingStyles','riceVariety','polishingRatio','alcoholPercent','vintage','photoId'],
+  Photos: ['photoId','reviewId','imageFile','photoType','caption','capturedAt','aiStatus'],
+  Tags: ['tagId','category','tagGroup','tagLabel','displayOrder','isActive'],
+  Wishlist: ['wishlistId','brandId','bottleId','wishNote','priority','status','addedAt','updatedAt']
+};
+
+function extractError(_json: unknown, status: number): Error {
+  if (status === 401) {
+    return new Error('Google認証の有効期限切れ、または権限取消しを検出しました。再度接続してください。');
+  }
+  if (status === 403) return new Error('権限が不足しています。Google CloudのDrive API・Sheets APIと認可設定を確認してください。');
+  if (status === 404) return new Error('ファイルが存在しないか、このアカウントから参照できません (HTTP 404)。');
+  return new Error('Google APIエラー (HTTP ' + status + ')。通信を確認して再試行してください。');
+}
+async function api<T>(token: string, url: string, init: RequestInit = {}): Promise<T> {
+  const requestId=crypto.randomUUID();
+  const startedAt=Date.now();
+  const host=new URL(url).hostname;
+  const apiHost=host==='www.googleapis.com'||host==='sheets.googleapis.com'?host:'other-google-api';
+  const method=(init.method||'GET').toUpperCase() as 'GET'|'POST'|'PUT'|'PATCH'|'DELETE';
+  recordAuthAuditEvent('api-request',{requestId,tokenPresent:!!token,apiHost,method});
+  if(init.signal?.aborted){
+    recordAuthAuditEvent('api-response',{requestId,tokenPresent:!!token,apiHost,method,outcome:'aborted',durationMs:0});
+    init.signal.throwIfAborted();
+  }
+  const response = await fetch(url, {
+    ...init,
+    signal: init.signal ? AbortSignal.any([init.signal,AbortSignal.timeout(45000)]) : AbortSignal.timeout(45000),
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      ...(init.body && !(init.body instanceof Blob) ? {'Content-Type': 'application/json'} : {}),
+      ...(init.headers || {})
+    }
+  }).catch((error:unknown) => {
+    const aborted=init.signal?.aborted||((error instanceof Error)&&error.name==='AbortError');
+    const timedOut=error instanceof Error&&error.name==='TimeoutError';
+    recordAuthAuditEvent('api-response',{requestId,tokenPresent:!!token,apiHost,method,
+      outcome:aborted?'aborted':timedOut?'timeout':'network-error',durationMs:Date.now()-startedAt});
+    if(aborted)throw error;
+    throw new Error(timedOut?'Google APIの応答がタイムアウトしました。接続を確認して同じ記録を再試行してください。':'通信エラー。接続を確認して再試行してください。');
+  });
+  const eventId=response.status===401?notifyAuthSessionSignal('authorization-invalid'):undefined;
+  recordAuthAuditEvent('api-response',{requestId,tokenPresent:!!token,apiHost,method,status:response.status,
+    ...(eventId?{eventId}:{}),outcome:response.status===401?'unauthorized':response.ok?'success':'failure',durationMs:Date.now()-startedAt});
+  if (!response.ok) {
+    const body = await response.json().catch(() => undefined);
+    throw extractError(body, response.status);
+  }
+  return response.json() as Promise<T>;
+}
+export async function requestGoogleAccess(): Promise<string> {
+  const betaOrigin = import.meta.env.VITE_BETA_ORIGIN || '';
+  if (betaOrigin && window.location.origin !== betaOrigin) throw new Error('このベータ版は専用URLから開いてください。');
+  if (!GOOGLE_CLIENT_ID) throw new Error('VITE_GOOGLE_CLIENT_IDが設定されていません。web/README.mdを確認してください。');
+  if (!window.google?.accounts?.oauth2) throw new Error('Google認証スクリプトの読込が終わっていません。通信を確認して再試行してください。');
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const rejectOnce = (error: Error) => { if (!settled) { settled = true; reject(error); } };
+    const client = window.google!.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GOOGLE_SCOPE,
+      include_granted_scopes: false,
+      callback: (response: TokenResponse) => {
+        if (settled) return;
+        settled = true;
+        if (response.access_token) resolve(response.access_token);
+        else reject(new Error(response.error_description || response.error || 'Google認証が完了しませんでした。'));
+      },
+      error_callback: () => rejectOnce(new Error('Google認証が中断されました。'))
+    });
+    client.requestAccessToken({ prompt: 'select_account' });
+  });
+}
+export function revokeAccess(token: string,eventId?:string): Promise<RevocationResponse> {
+  const revoke = typeof window === 'undefined' ? undefined : window.google?.accounts.oauth2.revoke;
+  const requestId=crypto.randomUUID();
+  const requestedAt=new Date().toISOString();
+  const startedAt=Date.now();
+  recordAuthAuditEvent('revoke-request',{requestId,eventId,tokenPresent:!!token});
+  return new Promise(resolve => {
+    let settled=false;
+    let watchdog:ReturnType<typeof setTimeout>|undefined;
+    const finish=(result:RevocationResponse,source:NonNullable<RevocationResponse['source']>)=>{
+      if(settled)return;
+      settled=true;clearTimeout(watchdog);
+      const completedAt=new Date().toISOString();
+      const response={...result,requestId,...(eventId?{eventId}:{}),requestedAt,completedAt,durationMs:Date.now()-startedAt,source};
+      recordAuthAuditEvent('revoke-callback',{requestId,eventId,tokenPresent:!!token,
+        outcome:response.successful?'success':source==='timeout'?'timeout':source==='unavailable'?'unavailable':'failure',
+        errorCode:response.error,durationMs:response.durationMs});
+      resolve(response);
+    };
+    if(!revoke){finish({successful:false,error:'unavailable'},'unavailable');return;}
+    // GIS callbacks sometimes never arrive. A timeout must never count as success.
+    watchdog=setTimeout(()=>finish({successful:false,error:'timeout'},'timeout'),10000);
+    try { revoke(token,response=>finish(response?.successful===true?{successful:true}:{successful:false,error:typeof response?.error==='string'?response.error:'unconfirmed'},'callback')); }
+    catch { finish({successful:false,error:'unavailable'},'exception'); }
+  });
+}
+export const APP_MARKER = SECURITY_TEST_MODE ? 'sakefolio-security-test-20261019-v1' : 'sakefolio-react-v1';
+type FileKind = 'root' | 'photos-folder' | 'spreadsheet' | 'photo';
+const metadata = (kind: FileKind) => ({appProperties: {sakefolioApp: APP_MARKER, sakefolioKind:kind}});
+interface DriveFile { id: string; name?: string; mimeType?: string }
+export interface DriveAccount { emailAddress:string; displayName:string }
+export async function getDriveAccount(token: string,signal?:AbortSignal): Promise<DriveAccount> {
+  const info = await api<{user?: DriveAccount}>(token,
+    'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)',{signal});
+  if (!info.user?.emailAddress) throw new Error('Googleアカウントの本人確認情報を取得できません。');
+  return info.user;
+}
+async function findFile(token: string, name: string, parentId: string, mimeType: string, kind: FileKind,signal?:AbortSignal): Promise<DriveFile | undefined> {
+  const safe = (x: string) => x.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const q = [
+    "trashed = false",
+    "'me' in owners",
+    ...(parentId ? ["'" + safe(parentId) + "' in parents"] : []),
+    "mimeType = '" + safe(mimeType) + "'",
+    "appProperties has { key='sakefolioApp' and value='" + APP_MARKER + "' }",
+    "appProperties has { key='sakefolioKind' and value='" + kind + "' }"
+  ].filter(Boolean).join(' and ');
+  const url = 'https://www.googleapis.com/drive/v3/files?' + new URLSearchParams({
+    q, fields: 'nextPageToken,files(id,name,mimeType)', pageSize: '100'
+  }).toString();
+  const result = await api<{files: DriveFile[]}>(token, url,{signal});
+  if ((result.files?.length || 0) > 1) throw new Error('同じ役割のSakefolio保存先（'+name+'）が複数あります。自動的に選ばず、管理者が確認してください。');
+  return result.files?.[0];
+}
+async function createFile(token: string, metadata: Record<string, unknown>,signal?:AbortSignal): Promise<DriveFile> {
+  return api<DriveFile>(token, 'https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType', {
+    method: 'POST', body: JSON.stringify(metadata),signal
+  });
+}
+async function initializeSpreadsheet(token: string, id: string,signal?:AbortSignal): Promise<void> {
+  const spreadsheet = await api<{sheets: {properties: {sheetId: number, title: string}}[]}>(token,
+    'https://sheets.googleapis.com/v4/spreadsheets/' + id + '?fields=sheets(properties(sheetId,title))',{signal});
+  const first = spreadsheet.sheets[0]?.properties;
+  if (!first) throw new Error('作成したスプレッドシートにシートがありません。');
+  const names = Object.keys(TABLE_HEADERS);
+  const existing = new Set(spreadsheet.sheets.map(x => x.properties.title));
+  const requests: Record<string, unknown>[] = [];
+  if (first.title !== 'Brands' && !existing.has('Brands')) {
+    requests.push({updateSheetProperties: {properties: {sheetId: first.sheetId, title: 'Brands'}, fields: 'title'}});
+    existing.add('Brands');
+  }
+  names.forEach(name => { if (!existing.has(name)) requests.push({addSheet: {properties: {title: name}}}); });
+  if (requests.length) {
+    await api(token, 'https://sheets.googleapis.com/v4/spreadsheets/' + id + ':batchUpdate',
+      {method:'POST',body:JSON.stringify({requests}),signal});
+  }
+  const data = [];
+  for (const name of names) {
+    const current = await getRows(token,id,name,'A1:AZ1',signal);
+    if (!current.length) data.push({range:"'"+name+"'!A1",values:[TABLE_HEADERS[name]]});
+  }
+  if (!data.length) return;
+  await api(token, 'https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values:batchUpdate',
+    {method:'POST',body:JSON.stringify({valueInputOption:'RAW',data}),signal});
+}
+/** Creates/reuses only files available to drive.file. Never overwrites old data. */
+export async function ensureStorage(token: string,signal?:AbortSignal): Promise<StorageInfo> {
+  const folderMime = 'application/vnd.google-apps.folder';
+  const sheetMime = 'application/vnd.google-apps.spreadsheet';
+  let folder = await findFile(token, STORAGE_FOLDER_NAME, '', folderMime, 'root',signal);
+  if (!folder) folder = await createFile(token,{name:STORAGE_FOLDER_NAME,mimeType:folderMime,...metadata('root')},signal);
+  let photos = await findFile(token,'Photos',folder.id,folderMime,'photos-folder',signal);
+  if (!photos) photos = await createFile(token,{name:'Photos',mimeType:folderMime,parents:[folder.id],...metadata('photos-folder')},signal);
+  let spreadsheet = await findFile(token,STORAGE_SHEET_NAME,folder.id,sheetMime,'spreadsheet',signal);
+  if (!spreadsheet) spreadsheet = await createFile(token,{name:STORAGE_SHEET_NAME,mimeType:sheetMime,parents:[folder.id],...metadata('spreadsheet')},signal);
+  // Validate known schema. Only initialize an empty/partially created app-owned workbook;
+  // never rewrite the headings of a populated workbook.
+  const structure = await api<{sheets:{properties:{sheetId:number,title:string}}[]}>(token,
+    'https://sheets.googleapis.com/v4/spreadsheets/'+spreadsheet.id+'?fields=sheets(properties(sheetId,title))',{signal});
+  const allTitles = new Set(structure.sheets.map(item => item.properties.title));
+  let needsSetup = Object.keys(TABLE_HEADERS).some(table=>!allTitles.has(table));
+  if (!needsSetup) {
+    for (const [table, expected] of Object.entries(TABLE_HEADERS)) {
+      const cells = await getRows(token,spreadsheet.id,table,'A1:AZ1',signal);
+      const current = cells[0] || [];
+      if (current.length === 0) { needsSetup = true; continue; }
+      if (expected.some((name,index) => current[index] !== name))
+        throw new Error('保存先の「'+table+'」の列構造が変わっています。データ保護のため書き込みを中止しました。');
+    }
+  }
+  if (needsSetup) {
+    // Guard every populated sheet before filling missing tabs/headers.
+    for (const [table,expected] of Object.entries(TABLE_HEADERS)) {
+      if (!allTitles.has(table)) continue;
+      const current = (await getRows(token,spreadsheet.id,table,'A1:AZ1',signal))[0] || [];
+      if (current.length && expected.some((name,index)=>current[index]!==name))
+        throw new Error('保存先の「'+table+'」が予期しない形式のため初期化を中止しました。');
+    }
+    await initializeSpreadsheet(token,spreadsheet.id,signal);
+  }
+  return {folderId:folder.id,photoFolderId:photos.id,spreadsheetId:spreadsheet.id};
+}
+async function getRows(token: string, id: string, table: string, range?: string,signal?:AbortSignal): Promise<string[][]> {
+  const encoded = encodeURIComponent("'" + table + "'!" + (range || 'A1:AZ'));
+  const value = await api<{values?: string[][]}>(token,
+    'https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + encoded,{signal});
+  return value.values || [];
+}
+async function appendRow(token: string, id: string, table: string, fields: Record<string,string>,signal?:AbortSignal): Promise<void> {
+  const header = TABLE_HEADERS[table];
+  if (!header) throw new Error('不明な保存先テーブル: ' + table);
+  await api(token,'https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' +
+    encodeURIComponent("'" + table + "'!A:AZ") +
+    ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', {
+      method:'POST',body:JSON.stringify({values:[header.map(key => fields[key] || '')]}),signal
+    });
+}
+export async function loadRecords(token: string, storage: StorageInfo,signal?:AbortSignal): Promise<RecordEntry[]> {
+  const rows = await getRows(token,storage.spreadsheetId,'Reviews',undefined,signal);
+  if (!rows.length) return [];
+  const headers = rows[0];
+  const records = rows.slice(1).filter(row => row[0]);
+  return records.map(row => ({
+    ...(Object.fromEntries(TABLE_HEADERS.Reviews.map(field => [field, String(row[headers.indexOf(field)] || '')])) as unknown as RecordEntry),
+    notes: String(row[headers.indexOf('comment')] || '')
+  })).sort((a,b) => b.drinkingDate.localeCompare(a.drinkingDate));
+}
+export async function loadManualBrands(token: string, storage: StorageInfo,signal?:AbortSignal): Promise<Brand[]> {
+  const rows = await getRows(token,storage.spreadsheetId,'Brands','A1:L',signal);
+  if (!rows.length) return [];
+  const headers = rows[0];
+  return rows.slice(1).filter(r => r.length && r[0]).map(row => ({
+    brandId: String(row[headers.indexOf('brandId')] || ''),
+    brandName: String(row[headers.indexOf('brandName')] || ''),
+    breweryName: String(row[headers.indexOf('breweryName')] || ''),
+    prefecture: String(row[headers.indexOf('prefecture')] || ''),
+    municipality: String(row[headers.indexOf('municipality')] || ''),
+    breweryAddress: String(row[headers.indexOf('breweryAddress')] || '')
+  }));
+}
+export async function uploadPhoto(token: string, folderId: string, file: File, id?: string, reviewId?: string, signal?:AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  const verified = await verifyPhoto(file);
+  const boundary = 'sakefolio_' + crypto.randomUUID().replace(/-/g,'');
+  // Generated name and content type derive from verified magic bytes, not user input.
+  const name = crypto.randomUUID() + '.' + verified.extension;
+  const photoMetadata = {id,name,parents:[folderId],description:'Sakefolio private label photo',
+    appProperties:{...metadata('photo').appProperties,...(reviewId ? {reviewId} : {})}};
+  const delimiter = '\r\n--' + boundary + '\r\n';
+  const body = new Blob([
+    '--' + boundary + '\r\n',
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+    JSON.stringify(photoMetadata),
+    delimiter,
+    'Content-Type: ' + verified.mime + '\r\n\r\n',
+    file,
+    '\r\n--' + boundary + '--'
+  ]);
+  const result = await api<{id:string}>(token,
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+      method:'POST', headers: {'Content-Type':'multipart/related; boundary=' + boundary}, body, signal
+    });
+  if (!result.id) throw new Error('写真保存後のファイルIDを取得できませんでした。');
+  return result.id;
+}
+/** Refuse IDs from spreadsheet text unless they still designate an app-owned
+ * photo in the current Sakefolio photo folder. Never download arbitrary Drive files.
+ * A Sheet cell is untrusted even when read through the user's own OAuth token.
+ */
+export async function getPhotoBlob(token: string, id: string, expectedFolderId?: string, signal?:AbortSignal): Promise<Blob> {
+  signal?.throwIfAborted();
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(id))
+    throw new Error('写真IDが正しい形式ではありません。');
+  const url='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id);
+  const meta=await api<{id?:string;mimeType?:string;parents?:string[];trashed?:boolean;ownedByMe?:boolean;shared?:boolean;
+    appProperties?:Record<string,string>}>(token,url+'?fields=id,mimeType,parents,trashed,appProperties,ownedByMe,shared',{signal});
+  if (meta.id!==id||meta.trashed===true||meta.ownedByMe!==true||meta.shared!==false||
+    meta.appProperties?.sakefolioApp!==APP_MARKER||meta.appProperties?.sakefolioKind!=='photo'||
+    (expectedFolderId&&!meta.parents?.includes(expectedFolderId)))
+    throw new Error('指定されたファイルはSakefolioが管理する写真ではありません。');
+  // The app never creates active-content MIME types.
+  if (!meta.mimeType||!['image/jpeg','image/png','image/webp','image/heic','image/heif','image/avif'].includes(meta.mimeType))
+    throw new Error('写真のMIMEタイプが許可されていません。');
+  signal?.throwIfAborted();
+  const requestId=crypto.randomUUID(),startedAt=Date.now();
+  recordAuthAuditEvent('api-request',{requestId,tokenPresent:!!token,apiHost:'www.googleapis.com',method:'GET'});
+  const response=await fetch(url+'?alt=media',{
+    signal:signal?AbortSignal.any([signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+token}
+  }).catch((error:unknown)=>{
+    const aborted=signal?.aborted||error instanceof Error&&error.name==='AbortError';
+    const timeout=error instanceof Error&&error.name==='TimeoutError';
+    recordAuthAuditEvent('api-response',{requestId,tokenPresent:!!token,apiHost:'www.googleapis.com',method:'GET',
+      outcome:aborted?'aborted':timeout?'timeout':'network-error',durationMs:Date.now()-startedAt});
+    if(aborted)throw error;
+    throw new Error(timeout?'写真の取得がタイムアウトしました。再試行してください。':'写真の通信エラー。接続を確認してください。');
+  });
+  const eventId=response.status===401?notifyAuthSessionSignal('authorization-invalid'):undefined;
+  recordAuthAuditEvent('api-response',{requestId,tokenPresent:!!token,apiHost:'www.googleapis.com',method:'GET',status:response.status,
+    ...(eventId?{eventId}:{}),outcome:response.status===401?'unauthorized':response.ok?'success':'failure',durationMs:Date.now()-startedAt});
+  if (!response.ok) throw extractError(undefined,response.status);
+  const contentLength=Number(response.headers.get('Content-Length')||'0');
+  if(contentLength>10*1024*1024)throw new Error('写真の容量が制限を超えています。');
+  const blob=await response.blob();
+  const verified=blob.size&&blob.size<=10*1024*1024?
+    detectPhotoType(new Uint8Array(await blob.slice(0,32).arrayBuffer())):null;
+  if(!verified||(verified.mime!==meta.mimeType &&
+    !(verified.mime==='image/heic'&&meta.mimeType==='image/heif') &&
+    !(verified.mime==='image/heif'&&meta.mimeType==='image/heic')))
+    throw new Error('保存された写真が未対応の形式、またはMIMEタイプと不一致です。');
+  // Safe, verified MIME is assigned explicitly instead of trusting response headers.
+  return blob.type===verified.mime?blob:new Blob([blob],{type:verified.mime});
+}
+export interface SaveAttempt {
+  reviewId: string;
+  brandId?: string;
+  photoFileId?: string;
+  startedAt?: string;
+}
+const activeSaves = new Set<string>();
+
+/** Read before append: a retry reconciles an uncertain response instead of repeating a write.
+ * Conflicting rows are never overwritten. This is not a distributed transaction/lock.
+ */
+async function ensureRow(token: string, storage: StorageInfo, table: string, fields: Record<string,string>,signal?:AbortSignal): Promise<void> {
+  const rows = await getRows(token,storage.spreadsheetId,table,undefined,signal);
+  const key = TABLE_HEADERS[table][0];
+  const matches = rows.slice(1).filter(row => row[0] === fields[key]);
+  if (matches.length > 1) throw new Error(table+'に同じIDが複数あります。自動変更せず確認してください。');
+  if (matches.length) {
+    if (TABLE_HEADERS[table].some((name,index) => String(matches[0][index] || '') !== (fields[name] || '')))
+      throw new Error(table+'の保存済み内容と一致しません。データ保護のため停止しました。');
+    return;
+  }
+  await appendRow(token,storage.spreadsheetId,table,fields,signal);
+  const confirmed = (await getRows(token,storage.spreadsheetId,table,undefined,signal)).slice(1).filter(row=>row[0]===fields[key]);
+  if (confirmed.length !== 1 || TABLE_HEADERS[table].some((name,index)=>String(confirmed[0][index] || '') !== (fields[name] || '')))
+    throw new Error(table+'への書き込み結果を確認できません。');
+}
+export async function saveRecord(
+  token: string, storage: StorageInfo, entry: RecordEntry, knownBrands: Brand[], photo: File | null,
+  attempt: SaveAttempt = {reviewId: crypto.randomUUID()},signal?:AbortSignal,onAttemptUpdate?:()=>Promise<void>
+): Promise<string> {
+  const key = storage.spreadsheetId+':'+attempt.reviewId;
+  if (activeSaves.has(key)) throw new Error('この記録は保存処理中です。');
+  activeSaves.add(key);
+  let stage = '入力確認';
+  try {
+    signal?.throwIfAborted();
+    validateRecordInput(entry);
+    if (photo) await verifyPhoto(photo);
+    stage = '保存先の列確認';
+    for (const table of ['Brands','Bottles','Reviews','Photos']) {
+      const current = (await getRows(token,storage.spreadsheetId,table,'A1:AZ1',signal))[0] || [];
+      if (TABLE_HEADERS[table].some((name,index) => current[index] !== name))
+        throw new Error('保存先の「'+table+'」の列構造が変わっています。データ保護のため書き込みを中止しました。');
+    }
+    const now = attempt.startedAt ||= new Date().toISOString();
+    const brandId = attempt.brandId ||= entry.brandId ||
+      knownBrands.find(b => b.brandName === entry.brandName && b.breweryName === entry.breweryName)?.brandId ||
+      'manual-'+attempt.reviewId;
+    await onAttemptUpdate?.();
+    stage = '銘柄保存';
+    if (brandId.startsWith('manual-') && !knownBrands.some(b => b.brandId === brandId)) {
+      await ensureRow(token,storage,'Brands',{
+        brandId,brandName:entry.brandName,breweryName:entry.breweryName,
+        prefecture:entry.prefecture,municipality:entry.municipality,
+        breweryAddress:entry.breweryAddress,source:'manual',createdAt:now,updatedAt:now
+      },signal);
+    }
+    // An immutable product snapshot per review also avoids conflating different brewing methods.
+    const bottleId = attempt.reviewId+'-bottle';
+    stage = '商品保存';
+    const bottle = {bottleId,brandId,productName:entry.productName || entry.brandName,
+      sakeType:entry.sakeType,sakeTypeOther:entry.sakeTypeOther,
+      processingStyle:entry.processingStyles,brewingMethod:entry.brewingMethod,
+      heatTreatment:entry.heatTreatment,riceVariety:entry.riceVariety,
+      polishingRatio:entry.polishingRatio,alcoholPercent:entry.alcoholPercent,
+      vintage:entry.vintage,createdAt:now,updatedAt:now};
+    await ensureRow(token,storage,'Bottles',bottle,signal);
+    let photoId = '';
+    if (photo) {
+      stage = '写真IDの予約';
+      if (!attempt.photoFileId) {
+        const reserved = await api<{ids:string[]}>(token,'https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files',{signal});
+        if (!reserved.ids?.[0]) throw new Error('写真IDを予約できませんでした。');
+        attempt.photoFileId = reserved.ids[0];
+        await onAttemptUpdate?.();
+      }
+      photoId = attempt.photoFileId;
+      stage = '写真アップロード';
+      // Only an explicit 404 permits creating the reserved ID; auth/network errors stop safely.
+      const url = 'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(photoId)+'?fields=id,parents,appProperties';
+      const checkSignal=signal?AbortSignal.any([signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000);
+      const requestId=crypto.randomUUID(),startedAt=Date.now();
+      recordAuthAuditEvent('api-request',{requestId,tokenPresent:!!token,apiHost:'www.googleapis.com',method:'GET'});
+      const response = await fetch(url,{signal:checkSignal,headers:{Authorization:'Bearer '+token}})
+        .catch((error:unknown) => {
+          const aborted=signal?.aborted||error instanceof Error&&error.name==='AbortError';
+          const timeout=error instanceof Error&&error.name==='TimeoutError';
+          recordAuthAuditEvent('api-response',{requestId,tokenPresent:!!token,apiHost:'www.googleapis.com',method:'GET',
+            outcome:aborted?'aborted':timeout?'timeout':'network-error',durationMs:Date.now()-startedAt});
+          if(aborted)throw error;
+          throw new Error(timeout?'写真確認がタイムアウトしました。再試行してください。':'写真確認中の通信エラー。再試行してください。');
+        });
+      const eventId=response.status===401?notifyAuthSessionSignal('authorization-invalid'):undefined;
+      recordAuthAuditEvent('api-response',{requestId,tokenPresent:!!token,apiHost:'www.googleapis.com',method:'GET',status:response.status,
+        ...(eventId?{eventId}:{}),outcome:response.status===401?'unauthorized':response.ok?'success':'failure',durationMs:Date.now()-startedAt});
+      if (response.status === 404) await uploadPhoto(token,storage.photoFolderId,photo,photoId,attempt.reviewId,signal);
+      else {
+        if (!response.ok) throw extractError(undefined,response.status);
+        const found = await response.json() as {parents?:string[];appProperties?:Record<string,string>};
+        if (!found.parents?.includes(storage.photoFolderId) ||
+          found.appProperties?.sakefolioApp!==APP_MARKER||found.appProperties?.sakefolioKind!=='photo'||
+          found.appProperties?.reviewId !== attempt.reviewId)
+          throw new Error('写真の保存先または記録IDが一致しません。');
+      }
+      stage = '写真の再取得確認';
+      await getPhotoBlob(token,photoId,storage.photoFolderId,signal);
+      stage = '写真情報保存';
+      await ensureRow(token,storage,'Photos',{
+        photoId:attempt.reviewId+'-photo',reviewId:attempt.reviewId,imageFile:photoId,
+        photoType:'表ラベル',capturedAt:now,aiStatus:'未解析'
+      },signal);
+    }
+    const review = {...entry,reviewId:attempt.reviewId,brandId,bottleId,photoId,comment:entry.notes,createdAt:now,updatedAt:now};
+    stage = '飲酒記録保存';
+    await ensureRow(token,storage,'Reviews',review,signal);
+    stage = '書き込み結果の再取得確認';
+    for (const [table,fields] of [['Bottles',bottle],['Reviews',review]] as const) {
+      const rows = await getRows(token,storage.spreadsheetId,table,undefined,signal);
+      const found = rows.slice(1).filter(row=>row[0] === fields[TABLE_HEADERS[table][0] as keyof typeof fields]);
+      if (found.length !== 1 || TABLE_HEADERS[table].some((name,index)=>String(found[0][index] || '') !== (fields[name as keyof typeof fields] || '')))
+        throw new Error(table+'への書き込み結果を確認できません。');
+    }
+    return attempt.reviewId;
+  } catch (error) {
+    if(signal?.aborted)throw error;
+    // Do not include upstream response bodies, credentials, filenames or user text.
+    throw new Error(stage+'：'+(error instanceof Error ? error.message : '保存に失敗しました。')+
+      ' 完了は未確認です。同じ画面の保存ボタンで再確認・再開できます。');
+  } finally { activeSaves.delete(key); }
+}
+
+/** Read-only diagnostics. Never delete/overwrite existing data to repair a partial save. */
+export async function inspectStorage(token: string, storage: StorageInfo,signal?:AbortSignal): Promise<string> {
+  if (!/^[A-Za-z0-9_-]{1,512}$/.test(storage.photoFolderId))
+    throw new Error('保存先の写真フォルダIDが不正です。');
+  const [reviews,photos,bottles] = await Promise.all(['Reviews','Photos','Bottles'].map(table=>getRows(token,storage.spreadsheetId,table,undefined,signal)));
+  // ChinaDrinks is optional. Inspect its presence without creating or repairing it.
+  const sheetMeta=await api<{sheets?:{properties?:{title?:string}}[]}>(token,
+    'https://sheets.googleapis.com/v4/spreadsheets/'+encodeURIComponent(storage.spreadsheetId)+'?fields=sheets(properties(title))',{signal});
+  const china=sheetMeta.sheets?.some(sheet=>sheet.properties?.title==='ChinaDrinks')
+    ? await getRows(token,storage.spreadsheetId,'ChinaDrinks','A1:Q',signal):[];
+  if(china.length&&(china[0][0]!=='id'||china[0][16]!=='photoId'))
+    throw new Error('ChinaDrinksの写真参照列を確認できません。診断を中止しました。');
+  const reviewIds = new Set(reviews.slice(1).map(r=>r[0]).filter(Boolean));
+  const usedBottles = new Set(reviews.slice(1).map(r=>r[2]));
+  const photoLinks = photos.slice(1).filter(r=>r[0]);
+  const chinaRecords=china.slice(1).filter(row=>row.some(Boolean));
+  const references=[...photoLinks.map(row=>({fileId:row[2],recordId:row[1]})),
+    ...reviews.slice(1).filter(row=>row[31]).map(row=>({fileId:row[31],recordId:row[0]})),
+    ...chinaRecords.filter(row=>row[16]).map(row=>({fileId:row[16],recordId:row[0]}))];
+  const validId=(id:string|undefined)=>!!id&&/^[A-Za-z0-9_-]{1,200}$/.test(id);
+  const invalidReferences=references.filter(ref=>!validId(ref.fileId)||!validId(ref.recordId)).length;
+  const linkedRecordsByPhoto=new Map<string,Set<string>>();
+  for(const ref of references){
+    if(!validId(ref.fileId)||!validId(ref.recordId))continue;
+    const records=linkedRecordsByPhoto.get(ref.fileId)||new Set<string>();
+    records.add(ref.recordId);linkedRecordsByPhoto.set(ref.fileId,records);
+  }
+  const photoIds = new Set(linkedRecordsByPhoto.keys());
+  const files: {id:string;parents?:string[];appProperties?:Record<string,string>;shared?:boolean;permissions?:{type?:string;role?:string}[]}[] = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({q:"trashed = false and '"+storage.photoFolderId+"' in parents",fields:'nextPageToken,files(id,parents,appProperties,shared,permissions(type,role))',pageSize:'1000',...(pageToken ? {pageToken} : {})});
+    const page = await api<{files:typeof files;nextPageToken?:string}>(token,'https://www.googleapis.com/drive/v3/files?'+query,{signal});
+    files.push(...(page.files || []));pageToken = page.nextPageToken || '';
+  } while (pageToken);
+  const fileIds = new Set(files.map(f=>f.id));
+  const missing = [...photoIds].filter(id=>!fileIds.has(id)).length;
+  const orphan = files.filter(f=>!photoIds.has(f.id)).length;
+  const markerMismatch=files.filter(file=>file.appProperties?.sakefolioApp!==APP_MARKER||
+    file.appProperties?.sakefolioKind!=='photo'||
+    (linkedRecordsByPhoto.has(file.id)&&(linkedRecordsByPhoto.get(file.id)!.size!==1||
+      !linkedRecordsByPhoto.get(file.id)!.has(file.appProperties?.reviewId||'')))).length;
+  const wrongParent=files.filter(file=>!file.parents?.includes(storage.photoFolderId)).length;
+  const shared=files.filter(file=>file.shared===true||file.permissions?.some(permission=>permission.role!=='owner')).length;
+  const sharingUnknown=files.filter(file=>file.shared===undefined).length;
+  const incomplete = photoLinks.filter(r=>!reviewIds.has(r[1])).length;
+  const missingLinks = reviews.slice(1).filter(r=>r[31] && !photoLinks.some(p=>p[1]===r[0] && p[2]===r[31])).length;
+  const unusedBottles = bottles.slice(1).filter(r=>r[0] && !usedBottles.has(r[0])).length;
+  return '保存先確認：記録 '+reviewIds.size+'件、中国酒記録 '+chinaRecords.length+'件、写真情報 '+photoLinks.length+'件。写真ファイル不足 '+missing+'件、未紐付け画像 '+orphan+'件、appProperties不一致 '+markerMismatch+'件、親フォルダ不一致 '+wrongParent+'件、共有中 '+shared+'件、共有状態不明 '+sharingUnknown+'件、記録未完了の写真情報 '+incomplete+'件、写真情報不足 '+missingLinks+'件、写真参照不正 '+invalidReferences+'件、未紐付け商品 '+unusedBottles+'件。データは変更していません。';
+}
+
+/** Optimistic editing of one Reviews snapshot. Never create a new row silently.
+ * Bottle table remains an immutable historical snapshot; Reviews carries
+ * the user's corrected display and analysis fields.
+ */
+export async function updateReview(token:string,storage:StorageInfo,
+ original:RecordEntry,changed:RecordEntry,replacement?:File|null,
+ attempt:SaveAttempt={reviewId:original.reviewId},signal?:AbortSignal):Promise<RecordEntry>{
+ if(!original.reviewId||changed.reviewId!==original.reviewId||changed.createdAt!==original.createdAt)
+  throw Error('編集対象のIDまたは作成日時が不正です。');
+ signal?.throwIfAborted();
+ validateRecordInput(changed);
+ if(attempt.reviewId!==original.reviewId)throw Error('別の記録の保存処理を再利用できません。');
+ const key=storage.spreadsheetId+':'+original.reviewId;
+ if(activeSaves.has(key))throw Error('同じ記録の更新が進行中です。');
+ activeSaves.add(key);
+ try{
+  const all=await getRows(token,storage.spreadsheetId,'Reviews',undefined,signal);
+  if(TABLE_HEADERS.Reviews.some((h,i)=>all[0]?.[i]!==h))throw Error('Reviewsの列が変更されています。');
+  const found=all.map((row,index)=>({row,index})).filter(x=>x.index>0&&x.row[0]===original.reviewId);
+  if(found.length!==1)throw Error('編集対象が見つからないか重複しています。');
+  const {row,index}=found[0],keys=TABLE_HEADERS.Reviews;
+  const originalValue=(k:string)=>k==='comment'?original.notes:
+   String((original as unknown as Record<string,string>)[k]||'');
+  const same=(expected:(k:string)=>string)=>keys.every((k,i)=>
+   k==='updatedAt'||String(row[i]||'')===expected(k));
+  // Read and verify the old revision before allocating a Drive photo ID.
+  const isOld=same(originalValue);
+  const time=attempt.startedAt ||= new Date().toISOString();
+  const next:{[key:string]:string}={...changed,
+    reviewId:original.reviewId,brandId:original.brandId,
+    bottleId:row[keys.indexOf('bottleId')]||'',
+    photoId:replacement?(attempt.photoFileId||original.photoId):original.photoId,
+    createdAt:original.createdAt,updatedAt:time,comment:changed.notes};
+  // A retry after a lost response may encounter the already-saved new revision.
+  if(!isOld){
+    const matching=same(k=>next[k]||'');
+    if(matching)return {...changed,photoId:next.photoId};
+    throw Error('別の画面で記録が変更されました。再読み込みしてください。');
+  }
+  if(replacement){
+    const type=await verifyPhoto(replacement);
+    if(type.mime!=='image/png')throw Error('編集写真を先にPNGへ安全変換してください。');
+    if(!attempt.photoFileId){
+      const ids=await api<{ids?:string[]}>(token,
+       'https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files',{signal});
+      if(!ids.ids?.[0])throw Error('写真IDを予約できませんでした。');
+      attempt.photoFileId=ids.ids[0];
+    }
+    const photoId=attempt.photoFileId;
+    const response=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(photoId)+
+      '?fields=id,parents,appProperties',{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000),
+      headers:{Authorization:'Bearer '+token}});
+    if(response.status===404){
+      await uploadPhoto(token,storage.photoFolderId,replacement,photoId,original.reviewId,signal);
+    }else{
+      if(!response.ok)throw extractError(undefined,response.status);
+      const meta=await response.json() as {parents?:string[];appProperties?:Record<string,string>};
+      if(!meta.parents?.includes(storage.photoFolderId)||
+        meta.appProperties?.sakefolioApp!==APP_MARKER||meta.appProperties?.sakefolioKind!=='photo'||
+        meta.appProperties?.reviewId!==original.reviewId)
+         throw Error('写真の保存先が一致しません。');
+    }
+    await getPhotoBlob(token,photoId,storage.photoFolderId,signal);
+    next.photoId=photoId;
+    // Keep a stable Photos link across retries, and retain old photos for rollback.
+    await ensureRow(token,storage,'Photos',{
+      photoId:original.reviewId+'-replacement-'+photoId,reviewId:original.reviewId,
+      imageFile:photoId,photoType:'表ラベル',capturedAt:time,aiStatus:'未解析'
+    },signal);
+  }
+  const body=keys.map(k=>next[k]||''),pos=index+1;
+  await api(token,'https://sheets.googleapis.com/v4/spreadsheets/'+storage.spreadsheetId+
+    '/values/'+encodeURIComponent("'Reviews'!A"+pos+':AF'+pos)+'?valueInputOption=RAW',
+    {method:'PUT',signal,body:JSON.stringify({values:[body]})});
+  const after=await getRows(token,storage.spreadsheetId,'Reviews',undefined,signal);
+  const confirmed=after.slice(1).filter(r=>r[0]===original.reviewId);
+  if(confirmed.length!==1||keys.some((_,i)=>String(confirmed[0][i]||'')!==body[i]))
+    throw Error('編集結果を確認できません。再読み込みしてください。');
+  return {...changed,photoId:next.photoId};
+ }finally{activeSaves.delete(key);}
+}

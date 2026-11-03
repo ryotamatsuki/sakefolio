@@ -1,0 +1,33 @@
+{
+  "name": "sakefolio-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test:security": "node --experimental-strip-types --test src/auditScripts.test.mjs src/codeqlGate.test.mjs src/App.test.mjs src/security.test.mjs src/authSession.test.mjs src/saveAttemptJournal.test.mjs src/google.test.mjs src/sensory.test.mjs src/catalog.test.mjs src/geocoding.test.mjs src/breweryMapModel.test.mjs src/tasteAnalytics.test.mjs src/dashboardDrilldown.test.mjs src/international.test.mjs src/requestGate.test.mjs src/internationalCloud.test.mjs src/storageNamespace.test.mjs src/InternationalDrinks.test.mjs src/recordManagement.test.mjs src/japanBackup.test.mjs",
+    "test:html-audit": "node --test scripts/html-audit-utils.test.mjs",
+    "build:beta": "node scripts/build-beta.mjs",
+    "verify:beta": "node scripts/verify-beta-deployment.mjs",
+    "test:deployment": "node --test scripts/verify-beta-deployment.test.mjs",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^8.3.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "parse5": "8.0.1",
+    "react-test-renderer": "^18.3.1",
+    "typescript": "^5.7.3"
+  }
+}

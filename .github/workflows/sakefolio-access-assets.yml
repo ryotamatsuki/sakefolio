@@ -1,0 +1,39 @@
+name: Sakefolio brewery access map PDF image audit
+on:
+  push:
+    branches: [test/sakefolio-pages-preview]
+    paths:
+      - ".github/workflows/sakefolio-access-assets.yml"
+      - "web/scripts/audit-brewery-access-assets.mjs"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: sakefolio-access-assets
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install PDF and Japanese OCR utilities
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils tesseract-ocr tesseract-ocr-jpn
+      - name: Install robots parser
+        run: npm install --no-save --package-lock=false --ignore-scripts robots-parser
+        working-directory: web
+      - name: Analyze first-party maps, PDFs and images
+        run: node scripts/audit-brewery-access-assets.mjs
+        working-directory: web
+      - name: Commit audit evidence
+        run: |
+          git config user.name "sakefolio-audit-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/brewery-access-map-assets-audit.json
+          if ! git diff --cached --quiet; then
+            git commit -m "data: inspect brewery access maps, PDF and image address evidence"
+            git push origin "HEAD:refs/heads/test/sakefolio-pages-preview"
+          fi

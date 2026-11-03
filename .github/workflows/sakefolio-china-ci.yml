@@ -1,0 +1,44 @@
+name: Sakefolio China beverage isolated CI
+on:
+  push:
+    branches:
+      - feat/china-beverages-local-first
+    paths:
+      - 'web/**'
+      - '.github/workflows/sakefolio-china-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-only:
+    name: Build, tests and vulnerability audit (no deployment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: web
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+        working-directory: web
+      - name: Run unit and security tests
+        run: npm run test:security
+        working-directory: web
+      - name: Typecheck and production build
+        run: npm run build
+        working-directory: web
+        env:
+          GITHUB_PAGES: 'true'
+      - name: Verify branch is isolated
+        run: |
+          echo "China feature branch: test only; no Pages deploy or main merge"

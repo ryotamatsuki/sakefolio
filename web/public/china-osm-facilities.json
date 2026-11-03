@@ -1,0 +1,91 @@
+{
+  "format": "sakefolio-china-osm-facilities-v1",
+  "license": "ODbL",
+  "generatedAt": "2026-10-17T03:59:58.278Z",
+  "rows": [
+    {
+      "id": "way/1156289026",
+      "name": "西园·克里斯酒庄",
+      "craft": "winery",
+      "kind": "wine",
+      "lat": 29.9883082,
+      "lon": 120.2407601,
+      "precision": "geometry_center",
+      "source": "https://www.openstreetmap.org/way/1156289026",
+      "operator": "",
+      "address": ""
+    },
+    {
+      "id": "way/1007517955",
+      "name": "张裕卡斯特酒庄",
+      "craft": "winery",
+      "kind": "wine",
+      "lat": 37.5745765,
+      "lon": 121.1734965,
+      "precision": "geometry_center",
+      "source": "https://www.openstreetmap.org/way/1007517955",
+      "operator": "",
+      "address": ""
+    },
+    {
+      "id": "way/1116020887",
+      "name": "烟台啤酒朝日公司",
+      "craft": "brewery",
+      "kind": "beer",
+      "lat": 37.52609,
+      "lon": 121.388256,
+      "precision": "geometry_center",
+      "source": "https://www.openstreetmap.org/way/1116020887",
+      "operator": "",
+      "address": ""
+    },
+    {
+      "id": "way/1128181380",
+      "name": "烟台酿酒有限公司",
+      "craft": "brewery",
+      "kind": "beer",
+      "lat": 37.5405918,
+      "lon": 121.3217988,
+      "precision": "geometry_center",
+      "source": "https://www.openstreetmap.org/way/1128181380",
+      "operator": "",
+      "address": ""
+    },
+    {
+      "id": "way/1137598534",
+      "name": "张裕葡萄酒城",
+      "craft": "winery",
+      "kind": "wine",
+      "lat": 37.5435009,
+      "lon": 121.1625172,
+      "precision": "geometry_center",
+      "source": "https://www.openstreetmap.org/way/1137598534",
+      "operator": "",
+      "address": ""
+    },
+    {
+      "id": "way/1234610965",
+      "name": "烟台啤酒青岛朝日",
+      "craft": "brewery",
+      "kind": "beer",
+      "lat": 37.3877454,
+      "lon": 121.6227292,
+      "precision": "geometry_center",
+      "source": "https://www.openstreetmap.org/way/1234610965",
+      "operator": "",
+      "address": ""
+    },
+    {
+      "id": "way/1233486357",
+      "name": "糊涂酒业公司",
+      "craft": "brewery",
+      "kind": "beer",
+      "lat": 27.7845874,
+      "lon": 106.381157,
+      "precision": "geometry_center",
+      "source": "https://www.openstreetmap.org/way/1233486357",
+      "operator": "",
+      "address": ""
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+name: Update pinned HTML audit parser lockfile
+on:
+  push:
+    branches: [security/sakefolio-audit-2026]
+    paths:
+      - web/package.json
+      - .github/workflows/sakefolio-html-parser-lock.yml
+permissions:
+  contents: write
+jobs:
+  lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/sakefolio-audit-2026
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Update dependency lock without executing package scripts
+        working-directory: web
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit new lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "build: lock parse5 HTML audit dependency"
+            git push origin HEAD:security/sakefolio-audit-2026
+          fi
