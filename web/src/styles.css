@@ -37,7 +37,7 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
 .hero h1{font-family:'Noto Serif JP',serif;font-weight:600;letter-spacing:.02em;font-size:clamp(36px,3.55vw,58px);line-height:1.65;margin:26px 0 23px}
 .hero h1 em{font-style:normal;color:#d6d69b}
 .hero-content>p{font-size:14px;line-height:2.3;color:#d0ded1}
-.hero-buttons{display:flex;align-items:center;gap:26px;margin-top:32px}
+.hero-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:26px;margin-top:32px}
 .hero-link{display:flex;align-items:center;gap:9px;border:0;background:none;color:#e5e6d4;font-size:13px;font-weight:700}
 .hero-stat{border-top:1px solid #ffffff2a;margin-top:49px;padding-top:20px;font-size:12px;color:#c5d0c3;letter-spacing:.03em}
 .hero-stat span{font-size:18px;font-weight:700;color:#eaeed2;margin-right:4px}
@@ -185,8 +185,8 @@ h1,h2,h3,h4,p{margin:0}button:focus-visible,a:focus-visible,input:focus-visible,
  .hero-content>p{font-size:12px}.hero-art{min-height:300px}
  .bottle{transform:translate(-50%,-50%) rotate(-5deg) scale(.67);top:49%}
  .bottle-shadow{top:84%}.hero-art-caption{font-size:8px}
- .hero-stat{margin-top:35px}.hero-buttons{gap:18px;margin-top:28px}
- .hero-link{font-size:12px}.button-cream{padding:14px 16px;font-size:12px}
+ .hero-stat{margin-top:35px}.hero-buttons{flex-direction:column;align-items:flex-start;gap:10px;margin-top:28px}
+ .hero-link{font-size:12px;min-height:44px;text-align:left}.hero-link svg{flex-shrink:0}.button-cream{padding:14px 16px;font-size:12px}
  .page-section{padding:52px 18px 74px}
  .section-title-row h2{font-size:25px}
  .section-subtitle{font-size:12px}.text-action{font-size:11px}
