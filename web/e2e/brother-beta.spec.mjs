@@ -135,7 +135,8 @@ test('anonymous catalogue search selects a Japanese sake without Google access',
  await page.getByRole('button',{name:'銘柄を探す',exact:true}).first().click();
  await page.getByLabel('銘柄・酒蔵を検索').fill('石鎚');
  const brand=page.locator('.brand-tile').filter({hasText:'石鎚'}).first();
- await expect(brand).toBeVisible();await brand.click();
- await expect(page.getByPlaceholder('例：石鎚')).toHaveValue('石鎚');
+ await expect(brand).toBeVisible();const selected=await brand.locator('h3').innerText();
+ expect(selected).toContain('石鎚');await brand.click();
+ await expect(page.getByPlaceholder('例：石鎚')).toHaveValue(selected);
  expect(states.A.tables.Reviews).toHaveLength(1);expect(states.B.tables.Reviews).toHaveLength(1);
 });

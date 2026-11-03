@@ -1,3 +1,17 @@
+# Brother Betaの最新状況（2026-11-03）
+
+限定試用の実装を[PR #7](https://github.com/ryotamatsuki/sakefolio/pull/7)へ統合しています。
+判定は **NO GO** です。
+専用オリジンの配信、実Googleの2アカウント分離試験、iPhone Safari実機試験が残っています。
+
+- [実装状況と検証の範囲](../docs/brother-beta/STATUS-20261103.md)
+- [所有者の設定手順とロールバック](../docs/brother-beta/OWNER-SETUP.md)
+- [最終受入表](../docs/brother-beta/ACCEPTANCE.md)
+- [招待後に渡す利用案内](../docs/brother-beta/USER-GUIDE.md)
+
+以下は既存機能と開発経緯の説明です。
+配信先と利用開始可否は上記の最新状況を優先してください。
+
 # Sakefolio React Web — 個人の Google Drive を利用
 
 既存AppSheetは変更しない。React + TypeScript + Viteで独自デザインを実装。専用サーバーや独自データベース不要。Google OAuthのdrive.fileスコープだけを要求し、利用者本人のGoogle SheetsとGoogle Driveに直接保存します。

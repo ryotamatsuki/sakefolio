@@ -97,7 +97,13 @@ test('retry journal stores only opaque retry metadata and refuses a different pe
     await assert.rejects(savePendingSaveJournal('sheet-id',accountHash,'a'.repeat(64),{reviewId:'review-2'}),/別の未確定保存/);
     const concurrent=await savePendingSaveJournal('sheet-id',accountHash,digest,{reviewId:'review-2'});
     assert.equal(concurrent.attempt.reviewId,'review-1');
-    await clearPendingSaveJournal();
+    await savePendingSaveJournal('sheet-id',accountHash,digest,{reviewId:'review-1',photoFileId:'reserved-photo'});
+    const stale=await savePendingSaveJournal('sheet-id',accountHash,digest,{reviewId:'review-1'});
+    assert.equal(stale.attempt.photoFileId,'reserved-photo');
+    await assert.rejects(savePendingSaveJournal('sheet-id',accountHash,digest,{reviewId:'review-1',photoFileId:'conflicting-photo'}),/予約状態/);
+    await clearPendingSaveJournal({spreadsheetId:'sheet-id',reviewId:'stale-review'});
+    assert.equal((await loadPendingSaveJournal()).attempt.reviewId,'review-1');
+    await clearPendingSaveJournal({spreadsheetId:'sheet-id',reviewId:'review-1'});
     assert.equal(await loadPendingSaveJournal(),null);
   }finally{if(previous===undefined)delete globalThis.indexedDB;else globalThis.indexedDB=previous;}
 });

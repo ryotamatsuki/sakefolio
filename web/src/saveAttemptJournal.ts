@@ -102,7 +102,21 @@ export async function savePendingSaveJournal(
           return;
         }
       }
-      store.put(journal);
+      // Reservations only advance; a delayed tab must not erase a reserved photo ID.
+      if(existing!==undefined){
+        for(const field of ['brandId','photoFileId','startedAt'] as const){
+          const oldValue=existing.attempt[field],nextValue=journal.attempt[field];
+          if(oldValue&&nextValue&&oldValue!==nextValue){
+            failure=new Error('再試行IDの予約状態が一致しません。保存先を確認してください。');
+            transaction.abort();return;
+          }
+        }
+        result={...journal,attempt:{...journal.attempt,...existing.attempt}};
+        // A newly reserved field is retained when absent from the older journal.
+        for(const field of ['brandId','photoFileId','startedAt'] as const)
+          if(journal.attempt[field])result.attempt[field]=journal.attempt[field];
+      }
+      store.put(result);
     };
     const fail=()=>{
       if(!settled){settled=true;db.close();reject(failure||new Error('再試行情報を保存できません。'));}
@@ -114,8 +128,21 @@ export async function savePendingSaveJournal(
   });
 }
 
-export async function clearPendingSaveJournal():Promise<void>{
-  await storeRequest('readwrite',store=>store.delete(JOURNAL_KEY));
+export async function clearPendingSaveJournal(expected:{spreadsheetId:string;reviewId:string}):Promise<void>{
+  const db=await openDatabase();
+  return new Promise((resolve,reject)=>{
+    let transaction:IDBTransaction;
+    try{transaction=db.transaction(STORE,'readwrite');}catch{db.close();reject(new Error('再試行情報を消去できません。'));return;}
+    const store=transaction.objectStore(STORE),request=store.get(JOURNAL_KEY);
+    request.onsuccess=()=>{
+      const current=request.result;
+      // A completed old tab cannot clear a newer tab's pending save.
+      if(isJournal(current)&&current.spreadsheetId===expected.spreadsheetId&&current.attempt.reviewId===expected.reviewId)
+        store.delete(JOURNAL_KEY);
+    };
+    transaction.oncomplete=()=>{db.close();resolve();};
+    transaction.onerror=transaction.onabort=()=>{db.close();reject(new Error('再試行情報を消去できません。'));};
+  });
 }
 
 async function sha256(value:BufferSource):Promise<string>{

@@ -331,7 +331,7 @@ export default function App() {
       const [saved, added] = await Promise.all([loadRecords(token,storage,controller.signal),loadManualBrands(token,storage,controller.signal)]);
       if (session.current !== current) return;
       if (!saved.some(record=>record.reviewId===reviewId)) throw new Error('保存後の一覧に記録が見つかりません。同じ画面から再確認してください。');
-      if(PERSIST_RETRIES&&!editingRecord){await clearPendingSaveJournal();pendingJournalRef.current=null;setPendingJournal(null);}
+      if(PERSIST_RETRIES&&!editingRecord){await clearPendingSaveJournal({spreadsheetId:storage.spreadsheetId,reviewId});pendingJournalRef.current=null;setPendingJournal(null);}
       pendingSave.current = null;
       setEditingRecord(null);editingAttempt.current=null;pendingEdit.current=null;
       setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);setSelectedPhoto(null);
@@ -377,7 +377,7 @@ export default function App() {
         if(ids.has(id)){
           const previous=await loadPendingSaveJournal();
           if(previous?.attempt.reviewId===id&&previous.spreadsheetId===storage.spreadsheetId&&previous.accountHash===await fingerprintAccount(accountEmail)){
-            await clearPendingSaveJournal();pendingJournalRef.current=null;setPendingJournal(null);
+            await clearPendingSaveJournal({spreadsheetId:storage.spreadsheetId,reviewId:id});pendingJournalRef.current=null;setPendingJournal(null);
           }
           skipped++;continue;
         }
@@ -401,7 +401,7 @@ export default function App() {
         await withSaveAttemptLock('sakefolio-save:'+storage.spreadsheetId,()=>
           saveRecord(token,storage,source,brands,restoredPhoto,attempt,controller.signal,persist));
         controller.signal.throwIfAborted();
-        await clearPendingSaveJournal();pendingJournalRef.current=null;setPendingJournal(null);
+        await clearPendingSaveJournal({spreadsheetId:storage.spreadsheetId,reviewId:id});pendingJournalRef.current=null;setPendingJournal(null);
         ids.add(id);added++;
       }
       await reloadCollection(current,controller.signal);
