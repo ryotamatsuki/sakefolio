@@ -77,6 +77,7 @@ export default function App() {
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [editingRecord, setEditingRecord] = useState<RecordEntry|null>(null);
   const editingAttempt=useRef<SaveAttempt|null>(null);
+  const pendingEdit=useRef<{original:RecordEntry;entry:RecordEntry;photo:File|null;attempt:SaveAttempt;email:string}|null>(null);
   const visibleRecords=useMemo(()=>records.filter(x=>!trash.some(t=>t.kind==='japan'&&t.id===x.reviewId)),[records,trash]);
   const [token, setToken] = useState('');
   const tokenRef=useRef('');
@@ -110,7 +111,7 @@ export default function App() {
   const sessionController=useRef<AbortController|null>(null);
   const invalidateSession=useCallback((signal:AuthSessionSignal,eventId?:string)=>{
     const tokenPresentBefore=Boolean(tokenRef.current);
-    const pending=pendingSave.current;
+    const pending=pendingSave.current||pendingEdit.current;
     const pendingChina=pendingChinaSave.current;
     session.current++;
     sessionController.current?.abort();
@@ -193,7 +194,7 @@ export default function App() {
     const current = ++session.current;
     const previousEmail = accountEmail;
     tokenRef.current='';setToken('');setStorage(null);setRecords([]);setTrash([]);setManualBrands([]);setAccountEmail('');
-    setEditingRecord(null);editingAttempt.current=null;setTrash([]);
+    if(!pendingEdit.current){setEditingRecord(null);editingAttempt.current=null;pendingEdit.current=null;}setTrash([]);
     setBusy(true); setMessage('');
     try {
       const accessToken = await requestGoogleAccess();
@@ -204,6 +205,7 @@ export default function App() {
         setMessage('前回の未確定保存が別のGoogleアカウントに紐付いています。同じ本人アカウントで再接続してください。');return;
       }
       if ((pendingSave.current && pendingSave.current.email !== account.emailAddress) ||
+          (pendingEdit.current && pendingEdit.current.email !== account.emailAddress) ||
           (pendingChinaSave.current && pendingChinaSave.current.email !== account.emailAddress)) {
         setMessage('未完了の保存があります。同じGoogleアカウントで再接続してください。');return;
       }
@@ -217,8 +219,9 @@ export default function App() {
       ]);
       if (session.current !== current) return;
       tokenRef.current=accessToken;setToken(accessToken);setStorage(myStorage);setRecords(saved);setManualBrands(added);setTrash(deleted);
+      if(pendingEdit.current){setEditingRecord(pendingEdit.current.original);setEntry(pendingEdit.current.entry);setSelectedPhoto(pendingEdit.current.photo);}
       setAccountEmail(account.emailAddress);
-      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current||pendingChinaSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
+      setMessage('接続先: '+account.emailAddress+'。このアカウントのSakefolioフォルダに保存します。'+(pendingSave.current||pendingEdit.current||pendingChinaSave.current?'未完了の記録は保存ボタンで再確認・再開してください。':''));
     } catch (error) {
       if (session.current !== current) return;
       setMessage(error instanceof Error ? error.message : '接続に失敗しました。');
@@ -233,7 +236,7 @@ export default function App() {
     const current=session.current;
     void revocation.then(result=>{
       if(session.current!==current||!tokenToRevoke)return;
-      const pendingNotice=pendingSave.current||pendingChinaSave.current||pendingJournalRef.current
+      const pendingNotice=pendingSave.current||pendingEdit.current||pendingChinaSave.current||pendingJournalRef.current
         ?' 未完了の記録があります。同じGoogleアカウントで再接続し、同じ保存ボタンで再確認してください。':'';
       setMessage((result.successful
         ?'Googleへの権限取り消し要求は受け付けられました。Google側で反映されるまで、別のアプリタブからのAPI読み取りが一時的に成功する場合があります。'
@@ -284,8 +287,10 @@ export default function App() {
     try {
       let reviewId:string;
       if(editingRecord){
-        reviewId=(await updateReview(token,storage,editingRecord,entry,photo,
-          editingAttempt.current ||= {reviewId:editingRecord.reviewId},controller.signal)).reviewId;
+        const edit=pendingEdit.current ||= {original:editingRecord,entry:{...entry},photo,
+          attempt:editingAttempt.current ||= {reviewId:editingRecord.reviewId},email:accountEmail};
+        reviewId=(await withSaveAttemptLock('sakefolio-save:'+storage.spreadsheetId,()=>
+          updateReview(token,storage,edit.original,edit.entry,edit.photo,edit.attempt,controller.signal))).reviewId;
       }else{
       let pending=pendingSave.current;
       if(!pending){
@@ -326,9 +331,9 @@ export default function App() {
       const [saved, added] = await Promise.all([loadRecords(token,storage,controller.signal),loadManualBrands(token,storage,controller.signal)]);
       if (session.current !== current) return;
       if (!saved.some(record=>record.reviewId===reviewId)) throw new Error('保存後の一覧に記録が見つかりません。同じ画面から再確認してください。');
-      if(PERSIST_RETRIES){await clearPendingSaveJournal();pendingJournalRef.current=null;setPendingJournal(null);}
+      if(PERSIST_RETRIES&&!editingRecord){await clearPendingSaveJournal();pendingJournalRef.current=null;setPendingJournal(null);}
       pendingSave.current = null;
-      setEditingRecord(null);editingAttempt.current=null;
+      setEditingRecord(null);editingAttempt.current=null;pendingEdit.current=null;
       setRecords(saved);setManualBrands(added);setEntry(emptyEntry());setPhoto(null);setSelectedPhoto(null);
       setShowAdvanced(false);setShowAllAromas(false);setAromaSearch('');setTab('home');
       setMessage(editingRecord?'既存の記録を更新しました。':'記録を保存しました。Google SheetsとDriveで確認できます。');
@@ -405,25 +410,25 @@ export default function App() {
     finally{if(sessionController.current===controller){sessionController.current=null;operation.current=false;setBusy(false);}}
   };
   const beginEdit=(r:RecordEntry)=>{
-    if(pendingSave.current){setMessage('未完了の保存を先に再確認してください。');return;}
+    if(pendingSave.current||pendingEdit.current||pendingJournalRef.current){setMessage('未完了の保存を先に再確認してください。');return;}
     setEditingRecord(r);editingAttempt.current=null;setEntry({...emptyEntry(),...r});setSelectedPhoto(null);setPhoto(null);
     setShowAdvanced(true);goto('record');
   };
   const beginRetaste=(r:RecordEntry)=>{
-    if(pendingSave.current){setMessage('未完了の保存を先に再確認してください。');return;}
+    if(pendingSave.current||pendingEdit.current||pendingJournalRef.current){setMessage('未完了の保存を先に再確認してください。');return;}
     const next={...emptyEntry(),brandId:r.brandId,brandName:r.brandName,breweryName:r.breweryName,
       prefecture:r.prefecture,municipality:r.municipality,breweryAddress:r.breweryAddress,
       productName:r.productName,sakeType:r.sakeType,sakeTypeOther:r.sakeTypeOther,
       heatTreatment:r.heatTreatment,brewingMethod:r.brewingMethod,processingStyles:r.processingStyles,
       riceVariety:r.riceVariety,polishingRatio:r.polishingRatio,alcoholPercent:r.alcoholPercent,vintage:r.vintage};
-    setEditingRecord(null);editingAttempt.current=null;setEntry(next);setSelectedPhoto(null);setPhoto(null);goto('record');
+    setEditingRecord(null);editingAttempt.current=null;pendingEdit.current=null;setEntry(next);setSelectedPhoto(null);setPhoto(null);goto('record');
   };
   const moveReview=async(r:RecordEntry)=>{
     if(!token||!storage||busy)return;
     if(!window.confirm('「'+r.brandName+'」をゴミ箱に移動しますか？ゴミ箱から復元できます（元データ・写真は削除されません）。'))return;
     operation.current=true;setBusy(true);const current=session.current;
     const controller=new AbortController();sessionController.current=controller;
-    try{await moveToTrash(token,storage,'japan',r.reviewId,controller.signal);await reloadCollection(current,controller.signal);if(current===session.current)setMessage('ゴミ箱へ移動しました。下のゴミ箱から復元できます。');}
+    try{await withSaveAttemptLock('sakefolio-save:'+storage.spreadsheetId,()=>moveToTrash(token,storage,'japan',r.reviewId,controller.signal));await reloadCollection(current,controller.signal);if(current===session.current)setMessage('ゴミ箱へ移動しました。下のゴミ箱から復元できます。');}
     catch(e){if(current===session.current)setMessage(e instanceof Error?e.message:'削除操作に失敗しました。');}
     finally{if(sessionController.current===controller){sessionController.current=null;operation.current=false;setBusy(false);}}
   };
@@ -431,7 +436,7 @@ export default function App() {
     if(!token||!storage||busy)return;
     operation.current=true;setBusy(true);const current=session.current;
     const controller=new AbortController();sessionController.current=controller;
-    try{await restoreFromTrash(token,storage,'japan',id,controller.signal);await reloadCollection(current,controller.signal);if(current===session.current)setMessage('記録を復元しました。');}
+    try{await withSaveAttemptLock('sakefolio-save:'+storage.spreadsheetId,()=>restoreFromTrash(token,storage,'japan',id,controller.signal));await reloadCollection(current,controller.signal);if(current===session.current)setMessage('記録を復元しました。');}
     catch(e){if(current===session.current)setMessage(e instanceof Error?e.message:'復元に失敗しました。');}
     finally{if(sessionController.current===controller){sessionController.current=null;operation.current=false;setBusy(false);}}
   };
@@ -626,7 +631,7 @@ export default function App() {
         <div className="interior-head"><SectionEyebrow>YOUR SAKE JOURNAL</SectionEyebrow>
           <h1>{editingRecord?'日本酒の記録を編集する':'日本酒を記録する'}<span className="green-period">.</span></h1>
           {editingRecord&&editingAttempt.current&&<p role="status">保存結果が不明な場合、同じ内容で再試行してください。修正が必要なら編集をキャンセルして再度開いてください。</p>}
-          {editingRecord&&<button className="text-action" type="button" onClick={()=>{setEditingRecord(null);editingAttempt.current=null;setEntry(emptyEntry());setSelectedPhoto(null);goto('home');}}>編集をキャンセル</button>}
+          {editingRecord&&<button className="text-action" type="button" onClick={()=>{setEditingRecord(null);editingAttempt.current=null;pendingEdit.current=null;setEntry(emptyEntry());setSelectedPhoto(null);goto('home');}}>編集をキャンセル</button>}
           <p>酒蔵・銘柄・商品・味わいをそれぞれ分けて保存します。分からない項目は空白のままで構いません。</p>
         </div>
         <form onSubmit={save} className="record-form">

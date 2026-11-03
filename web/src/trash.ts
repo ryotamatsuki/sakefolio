@@ -3,6 +3,7 @@
  * Sheets row or photo. UI must describe this as moving to Trash.
  */
 import type {StorageInfo} from './types';
+import {notifyAuthSessionSignal} from './authSession.ts';
 export type RecordKind='japan'|'china';
 export interface TrashEntry{kind:RecordKind;id:string;deletedAt:string}
 const TAB='SakefolioTrash';
@@ -14,6 +15,7 @@ async function call<T>(token:string,url:string,init:RequestInit={}):Promise<T>{
  if(!token)throw Error('Googleに接続してください。');
  const r=await fetch(url,{...init,signal:init.signal?AbortSignal.any([init.signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000),
   headers:{Authorization:'Bearer '+token,...(init.body?{'Content-Type':'application/json'}:{})}});
+ if(r.status===401)notifyAuthSessionSignal('authorization-invalid');
  if(!r.ok)throw Error('ゴミ箱のGoogle Sheets操作に失敗しました（HTTP '+r.status+'）。');
  return r.json() as Promise<T>;
 }
@@ -67,7 +69,8 @@ export async function moveToTrash(token:string,storage:StorageInfo,kind:RecordKi
 export async function restoreFromTrash(token:string,storage:StorageInfo,kind:RecordKind,id:string,signal?:AbortSignal):Promise<void>{
  const current=await rows(token,storage,signal);
  const matches=current.map((x,index)=>({row:x,index})).filter(x=>x.index>0&&x.row[0]===kind&&x.row[1]===id);
- if(matches.length!==1)throw Error('復元対象が存在しないか重複しています。');
+ if(!matches.length)return; // A retry may observe an already-cleared tombstone.
+ if(matches.length!==1)throw Error('復元対象が重複しています。');
  // Keep physical Sheets rows; clear only the exact app-created tombstone.
  const rowNumber=matches[0].index+1;
  await call(token,base(storage.spreadsheetId)+'/values/'+range('A'+rowNumber+':C'+rowNumber)+':clear',

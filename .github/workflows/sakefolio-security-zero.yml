@@ -1,6 +1,7 @@
 name: Sakefolio CodeQL security-zero and regression suite
 on:
   pull_request:
+    branches: [test/sakefolio-pages-preview]
   push:
     branches: [test/sakefolio-pages-preview, security/sakefolio-codeql-zero-20261102]
 permissions:

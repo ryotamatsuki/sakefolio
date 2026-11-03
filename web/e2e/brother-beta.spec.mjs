@@ -16,7 +16,7 @@ async function fixture(page,{loseReviewResponse=false}={}){
  let lost=false;
  await page.addInitScript(()=>{window.__testAccount='A';});
  await page.route('https://accounts.google.com/gsi/client',route=>route.fulfill({contentType:'application/javascript',body:`window.google={accounts:{oauth2:{initTokenClient:(config)=>({requestAccessToken:()=>config.callback({access_token:'synthetic-'+window.__testAccount})}),revoke:(_token,callback)=>callback({successful:true})}}};`}));
- await page.route(/https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com|tile\.openstreetmap\.org)\//,route=>route.fulfill({status:200,contentType:'text/css',body:''}));
+ await page.route(/^https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com|tile\.openstreetmap\.org)\/.*$/,route=>route.fulfill({status:200,contentType:'text/css',body:''}));
  const routeApi=async route=>{
   const req=route.request(),u=new URL(req.url()),account=req.headers().authorization?.replace('Bearer synthetic-',''),state=states[account];
   if(!state)return route.fulfill({status:401,json:{}});

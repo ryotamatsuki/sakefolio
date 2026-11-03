@@ -43,8 +43,9 @@ export async function buildJapanBackup(records:RecordEntry[],readPhoto:(id:strin
   if(estimated>LIMIT)throw Error('バックアップの80MB制限を超えました。件数を分けてください。');
   items.push(item);
  }
- return new Blob([JSON.stringify({format:'sakefolio-japan-v1',createdAt:new Date().toISOString(),items})],
-  {type:'application/json'});
+ const archive=new Blob([JSON.stringify({format:'sakefolio-japan-v1',createdAt:new Date().toISOString(),items})],{type:'application/json'});
+ if(archive.size>LIMIT)throw Error('バックアップの80MB制限を超えました。件数を分けてください。');
+ return archive;
 }
 export async function readJapanBackup(file:File):Promise<JapanArchiveItem[]>{
  if(file.size>LIMIT)throw Error('バックアップは80MB以下にしてください。');
