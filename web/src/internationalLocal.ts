@@ -5,6 +5,7 @@ import {sanitizePhotoForStorage} from './photos.ts';
 import type {BeverageKind} from './internationalCatalog.ts';
 
 const DB='sakefolio-international-local-v1';
+// Soft delete retains original data for undo; permanent removal must be a distinct confirmed action.
 const STORE='drinks';
 export const MAX_LOCAL_PHOTO_BYTES=10*1024*1024;
 const MAX_TEXT=4000,MAX_IMPORT_BYTES=80*1024*1024;
@@ -27,6 +28,7 @@ export interface InternationalRecord {
  createdAt:string;
  photo:Blob|null;
  photoId?:string;
+ trashedAt?:string;
 }
 export type InternationalTextRecord=Omit<InternationalRecord,'photo'>;
 const isObject=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
@@ -53,6 +55,7 @@ export function validateInternationalRecord(r:InternationalRecord):void {
    if(!/^[a-zA-Z]{1,40}$/.test(key)||typeof value!=='string'||value.length>MAX_TEXT)
      throw new Error('詳細項目に不正な値があります。');
  validateTechnicalSpecs(r.attributes);
+ if(r.trashedAt!==undefined&&(typeof r.trashedAt!=='string'||(r.trashedAt!==''&&!/^\d{4}-\d{2}-\d{2}T/.test(r.trashedAt))))throw new Error('削除日時が不正です。');
  if(r.photoId!==undefined&&(typeof r.photoId!=='string'||r.photoId.length>200||!/^[\w-]*$/.test(r.photoId)))
    throw new Error('写真IDが不正です。');
  if(r.experience==='test'&&!r.notes.includes('UXTEST'))throw new Error('評価テストはUXTESTと明記してください。');
@@ -83,13 +86,41 @@ async function requestStore<T>(mode:IDBTransactionMode,fn:(store:IDBObjectStore)
 }
 export async function listInternationalRecords():Promise<InternationalRecord[]>{
  const values=await requestStore<InternationalRecord[]>('readonly',s=>s.getAll());
- return values.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+ return values.filter(x=>!x.trashedAt).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
 }
 export async function saveInternationalRecord(data:InternationalRecord,photoFile:File|null):Promise<void>{
  if(photoFile)data.photo=await sanitizePhotoForStorage(photoFile);
  validateInternationalRecord(data);
  // add() prevents overwriting another tasting with the same ID.
  await requestStore('readwrite',s=>s.add(data));
+}
+
+export async function listTrashedInternationalRecords():Promise<InternationalRecord[]>{
+ const items=await requestStore<InternationalRecord[]>('readonly',s=>s.getAll());
+ return items.filter(x=>!!x.trashedAt);
+}
+export async function replaceInternationalRecord(previous:InternationalRecord,next:InternationalRecord,photoFile:File|null):Promise<void>{
+ if(previous.id!==next.id||previous.createdAt!==next.createdAt)throw Error('編集対象の識別情報が異なります。');
+ const items=await requestStore<InternationalRecord[]>('readonly',s=>s.getAll());
+ const existing=items.find(x=>x.id===previous.id);
+ if(!existing||existing.createdAt!==previous.createdAt||existing.trashedAt)throw Error('編集対象がありません。');
+ next.photo=photoFile?await sanitizePhotoForStorage(photoFile):existing.photo;
+ next.photoId=existing.photoId;
+ validateInternationalRecord(next);
+ await requestStore('readwrite',s=>s.put(next));
+}
+export async function trashLocalInternationalRecord(id:string):Promise<void>{
+ const items=await requestStore<InternationalRecord[]>('readonly',s=>s.getAll());
+ const found=items.find(x=>x.id===id);
+ if(!found)throw Error('対象の記録が見つかりません。');
+ await requestStore('readwrite',s=>s.put({...found,trashedAt:found.trashedAt||new Date().toISOString()}));
+}
+export async function restoreLocalInternationalRecord(id:string):Promise<void>{
+ const items=await requestStore<InternationalRecord[]>('readonly',s=>s.getAll());
+ const found=items.find(x=>x.id===id);
+ if(!found||!found.trashedAt)throw Error('復元対象が見つかりません。');
+ const {...item}=found;delete item.trashedAt;
+ await requestStore('readwrite',s=>s.put(item));
 }
 const encodePhoto=async(blob:Blob):Promise<string>=>{
  const buffer=await blob.arrayBuffer(),bytes=new Uint8Array(buffer);

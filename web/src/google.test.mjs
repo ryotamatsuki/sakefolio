@@ -12,6 +12,7 @@ const authSession=await import(authSessionUrl);
 const source = readFileSync(new URL('./google.ts', import.meta.url), 'utf8')
   .replace("from './security'", `from '${securityUrl}'`)
   .replace("from './authSession'", `from '${authSessionUrl}'`)
+  .replace('import.meta.env.VITE_BETA_ORIGIN', "''")
   .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID', "'test-client-id'")
   .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",'false');
 const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
@@ -62,7 +63,7 @@ test('logout during photo metadata lookup prevents a later media download',async
   const controller=new AbortController();let calls=0;
   globalThis.fetch=async()=>{
     calls++;controller.abort();
-    return json({id:'photo-id',mimeType:'image/png',parents:['test-photos'],
+    return json({id:'photo-id',mimeType:'image/png',ownedByMe:true,shared:false,parents:['test-photos'],
       appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo'}});
   };
   await assert.rejects(google.getPhotoBlob('fake-token','photo-id','test-photos',controller.signal),{name:'AbortError'});
@@ -132,6 +133,13 @@ function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false
       const range=decodeURIComponent(url.pathname.split('/values/')[1]||'');
       const table=range.match(/^'([^']+)'/)?.[1];
       assert.ok(tables[table], 'unexpected table');
+      if(init.method==='PUT'){
+        const position=Number(range.match(/!A(\d+):/)?.[1]);
+        assert.ok(position>=2&&position<=tables[table].length);
+        tables[table][position-1]=JSON.parse(init.body).values[0];
+        writes.push('edit:'+table);
+        return json({updatedCells:tables[table][position-1].length});
+      }
       if(init.method==='POST'){
         assert.equal(url.searchParams.get('valueInputOption'),'RAW');
         const values=JSON.parse(init.body).values;
@@ -150,7 +158,7 @@ function mockGoogle({failTable='',afterWrite=false,dropWrite='',failUpload=false
       assert.deepEqual(meta.parents,['test-photos']);
       assert.equal(meta.appProperties.sakefolioKind,'photo');
       assert.equal(files.has(meta.id),false,'must never duplicate an upload');
-      files.set(meta.id,{...meta,mimeType:'image/png',trashed:false});writes.push('Drive');
+      files.set(meta.id,{...meta,mimeType:'image/png',ownedByMe:true,shared:false,trashed:false});writes.push('Drive');
       if(failUpload&&!failed){failed=true;throw new TypeError('Upload response lost');}
       return json({id:meta.id});
     }
@@ -279,7 +287,7 @@ test('photo errors distinguish 401, 403, 404, network and invalid bytes without 
   globalThis.fetch=async(input)=>{
     const url=new URL(input);
     if(url.searchParams.get('alt')==='media')return new Response('<html>invalid</html>');
-    return json({id:'id',mimeType:'image/png',parents:['test-photos'],
+    return json({id:'id',mimeType:'image/png',ownedByMe:true,shared:false,parents:['test-photos'],
       appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo'}});
   };
   await assert.rejects(google.getPhotoBlob('secret','id'),/未対応/);
@@ -422,7 +430,7 @@ test('getPhotoBlob refuses non-Sakefolio IDs without downloading file bytes',asy
  globalThis.fetch=async(input)=>{
    const u=new URL(input);
    if(u.searchParams.get('alt')==='media'){accessedMedia=true;return new Response(imageBytes);}
-   return json({id:u.pathname.split('/').at(-1),mimeType:'image/png',parents:['test-photos'],
+   return json({id:u.pathname.split('/').at(-1),mimeType:'image/png',ownedByMe:true,shared:false,parents:['test-photos'],
      appProperties:{sakefolioApp:'other-app',sakefolioKind:'photo'}});
  };
  await assert.rejects(google.getPhotoBlob('fake-token','wrong-photo-id','test-photos'),/管理する写真ではありません/);
@@ -430,7 +438,7 @@ test('getPhotoBlob refuses non-Sakefolio IDs without downloading file bytes',asy
 });
 test('getPhotoBlob enforces the expected app-owned photo folder and safe MIME',async()=>{
  let contentRead=false;
- const meta={id:'private-photo-id',mimeType:'image/png',parents:['other-folder'],
+ const meta={id:'private-photo-id',mimeType:'image/png',ownedByMe:true,shared:false,parents:['other-folder'],
    appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo'}};
  globalThis.fetch=async(input)=>{
    const u=new URL(input);
@@ -468,3 +476,53 @@ test('inspectStorage rejects unsafe Drive folder identifiers before reading Goog
  assert.equal(networkCalls,0);
 });
 
+test('Japanese review edit verifies current row, preserves ID, rejects a stale editor',async()=>{
+ const state=mockGoogle();
+ await google.saveRecord('first',storage,record,[],null,{reviewId:'edit-review'});
+ const original=(await google.loadRecords('first',storage))[0];
+ assert.equal(original.reviewId,'edit-review');
+ await google.updateReview('first',storage,original,{...original,notes:'編集した感想'},null);
+ const newer=(await google.loadRecords('first',storage))[0];
+ assert.equal(newer.notes,'編集した感想');
+ assert.equal(newer.reviewId,'edit-review');
+ assert.equal(state.writes.filter(x=>x==='edit:Reviews').length,1);
+ await assert.rejects(google.updateReview('first',storage,original,{...original,notes:'古い編集'},null),/別の画面/);
+ assert.equal(state.writes.filter(x=>x==='edit:Reviews').length,1);
+});
+
+test('photo replacement on Japanese edit is idempotent after lost Sheets update response',async()=>{
+ const state=mockGoogle();
+ await google.saveRecord('first',storage,record,[],null,{reviewId:'edited-with-photo'});
+ const original=(await google.loadRecords('first',storage))[0];
+ const amended={...original,notes:'新しい写真'};
+ const attempt={reviewId:original.reviewId};
+ const real=globalThis.fetch;
+ let lost=false;
+ globalThis.fetch=async(input,init={})=>{
+  const url=new URL(input);
+  if(!lost&&init.method==='PUT'&&url.hostname==='sheets.googleapis.com'){
+   lost=true;await real(input,init);throw new TypeError('Response lost');
+  }
+  return real(input,init);
+ };
+ await assert.rejects(google.updateReview('first',storage,original,amended,image,attempt),/通信エラー/);
+ assert.ok(attempt.photoFileId);
+ await google.updateReview('first',storage,original,amended,image,attempt);
+ const result=(await google.loadRecords('first',storage))[0];
+ assert.equal(result.notes,'新しい写真');
+ assert.equal(result.photoId,attempt.photoFileId);
+ assert.equal(state.writes.filter(x=>x==='Drive').length,1);
+ assert.equal(state.tables.Photos.length,2);
+});
+
+test('Japanese edit abort during revision read starts no photo or row write',async()=>{
+ const state=mockGoogle();
+ await google.saveRecord('first',storage,record,[],null,{reviewId:'abort-edit'});
+ const original=(await google.loadRecords('first',storage))[0];
+ const backend=globalThis.fetch,controller=new AbortController();let reads=0;
+ globalThis.fetch=async(url,init)=>{reads++;const r=await backend(url,init);controller.abort();return r;};
+ const count=state.writes.length;
+ await assert.rejects(google.updateReview('first',storage,original,{...original,notes:'must not write'},null,
+  {reviewId:original.reviewId},controller.signal),{name:'AbortError'});
+ assert.equal(reads,1);assert.equal(state.writes.length,count);
+});

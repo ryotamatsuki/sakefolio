@@ -14,7 +14,7 @@ let fault='',first=true,release,entered,calls=[],rows=new Map(),files=new Map();
 const services={GOOGLE_CLIENT_ID:'fake-client',SECURITY_TEST_MODE:false,
   requestGoogleAccess:async()=>'fake-only',getDriveAccount:async()=>({emailAddress:'qa@example.invalid'}),ensureStorage:async()=>storage,
   loadManualBrands:async()=>[],loadRecords:async()=>[...rows.values()],getPhotoBlob:async()=>new Blob(),inspectStorage:async()=>'',
-  revokeAccess:async()=>({successful:true}),
+  revokeAccess:async()=>({successful:true}),updateReview:async()=>{},
   saveRecord:async(_token,_storage,entry,_brands,photo,attempt,signal)=>{
     calls.push({attempt,signal});attempt.photoFileId||='fake-photo';
     if(first&&fault==='before'){first=false;throw Error('Controlled network failure');}
@@ -25,25 +25,30 @@ const services={GOOGLE_CLIENT_ID:'fake-client',SECURITY_TEST_MODE:false,
     return attempt.reviewId;
   }};
 globalThis.__sakefolioP0AppServices=services;
-const googleUrl=moduleUrl('export const {GOOGLE_CLIENT_ID,SECURITY_TEST_MODE,requestGoogleAccess,getDriveAccount,ensureStorage,loadManualBrands,loadRecords,getPhotoBlob,inspectStorage,revokeAccess,saveRecord}=globalThis.__sakefolioP0AppServices;');
+const googleUrl=moduleUrl('export const {GOOGLE_CLIENT_ID,SECURITY_TEST_MODE,requestGoogleAccess,getDriveAccount,ensureStorage,loadManualBrands,loadRecords,getPhotoBlob,inspectStorage,revokeAccess,saveRecord,updateReview}=globalThis.__sakefolioP0AppServices;');
 let source=readFileSync(new URL('./App.tsx',import.meta.url),'utf8').replaceAll('import.meta.env.BASE_URL',"'/'");
 const iconNames=source.match(/import\s*\{([^}]+)\}\s*from 'lucide-react'/s)[1].split(',').map(x=>x.trim()).filter(Boolean);
 const icons=moduleUrl(iconNames.map(n=>'export const '+n+'=()=>null;').join('\n'));
+let journal=null;
+globalThis.__sakefolioJournal={loadPendingSaveJournal:async()=>journal,clearPendingSaveJournal:async()=>{journal=null;},fingerprintAccount:async()=> 'a'.repeat(64),fingerprintSaveInput:async()=> 'b'.repeat(64),savePendingSaveJournal:async(spreadsheetId,accountHash,fingerprint,attempt)=>journal={spreadsheetId,accountHash,fingerprint,attempt},withSaveAttemptLock:async(_key,fn)=>fn()};
+const journalUrl=moduleUrl('export const {loadPendingSaveJournal,clearPendingSaveJournal,fingerprintAccount,fingerprintSaveInput,savePendingSaveJournal,withSaveAttemptLock}=globalThis.__sakefolioJournal;');
+const trash=moduleUrl('export const listTrash=async()=>[],moveToTrash=async()=>{},restoreFromTrash=async()=>{};');
 const empty=moduleUrl('export default function Component(){return null;}');
 const auth=moduleUrl('export const broadcastAuthSessionSignal=()=>{},recordAuthAuditEvent=()=>{},listenForAuthSessionSignals=()=>()=>{};');
 const photos=moduleUrl('export const createPhotoPreview=async()=>new Blob([new Uint8Array([137,80,78,71,13,10,26,10])],{type:"image/png"});');
 const catalog=compile(readFileSync(new URL('./catalog.ts',import.meta.url),'utf8').replaceAll('import.meta.env.BASE_URL',"'/'"));
 for(const [name,url] of Object.entries({react:pathToFileURL(require.resolve('react')).href,'lucide-react':icons,
   './google':googleUrl,'./authSession':auth,'./photos':photos,'./catalog':catalog,
+  './trash':trash,'./Legal':empty,'./recordArchive':new URL('./recordArchive.ts',import.meta.url).href,'./japanBackup':moduleUrl('export const buildJapanBackup=async()=>new Blob(),readJapanBackup=async()=>[],restoredRecordId=async(id)=>"restored-"+id;'),
   './BreweryMap':empty,'./TasteDashboard':empty,'./InternationalDrinks':empty,
   './security':new URL('./security.ts',import.meta.url).href,'./sensory':new URL('./sensory.ts',import.meta.url).href,
-  './saveAttemptJournal':new URL('./saveAttemptJournal.ts',import.meta.url).href
+  './saveAttemptJournal':journalUrl
 }))source=source.replaceAll("from '"+name+"'","from '"+url+"'");
 let js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 js=js.replace('from "react/jsx-runtime"',`from "${pathToFileURL(require.resolve('react/jsx-runtime')).href}"`);
 const {default:App}=await import(moduleUrl(js));
 const realFetch=globalThis.fetch,realWindow=globalThis.window;
-test.beforeEach(()=>{fault='';first=true;calls=[];rows=new Map();files=new Map();globalThis.window={scrollTo(){}};globalThis.fetch=async()=>new Response('[]');});
+test.beforeEach(()=>{journal=null;fault='';first=true;calls=[];rows=new Map();files=new Map();globalThis.window={scrollTo(){}};globalThis.fetch=async()=>new Response('[]');});
 test.afterEach(()=>{globalThis.fetch=realFetch;if(realWindow===undefined)delete globalThis.window;else globalThis.window=realWindow;});
 const text=tree=>JSON.stringify(tree.toJSON());
 const button=(tree,label)=>tree.root.findAllByType('button').find(n=>n.children.some(c=>typeof c==='string'&&c.includes(label)));

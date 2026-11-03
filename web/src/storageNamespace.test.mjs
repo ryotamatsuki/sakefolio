@@ -14,6 +14,7 @@ async function compiled(mode){
  const src=source
   .replace("from './security'", "from '"+securityUrl+"'")
   .replace("from './authSession'", "from '"+authSessionUrl+"'")
+  .replace('import.meta.env.VITE_BETA_ORIGIN', "''")
   .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
   .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",mode?'true':'false')
   .replace('configureSecurityAudit(SECURITY_TEST_MODE);','configureSecurityAudit(false);');

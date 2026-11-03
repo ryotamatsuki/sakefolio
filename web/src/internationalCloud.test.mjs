@@ -20,7 +20,8 @@ const cloudSource=readFileSync(new URL('./internationalCloud.ts',import.meta.url
 async function cloudForMode(mode){
   const googleUrl=compile(googleSource.replace("from './security'",`from '${securityUrl}'`)
     .replace("from './authSession'",`from '${authSessionUrl}'`)
-    .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
+    .replace('import.meta.env.VITE_BETA_ORIGIN', "''")
+  .replace('import.meta.env.VITE_GOOGLE_CLIENT_ID',"'test-client-id'")
     .replace("import.meta.env.VITE_SAKEFOLIO_SECURITY_TEST === '20261019'",mode?'true':'false')
     .replace('configureSecurityAudit(SECURITY_TEST_MODE);','configureSecurityAudit(false);'));
   const cloudUrl=compile(cloudSource,[
@@ -94,7 +95,7 @@ for(const mode of [false,true])for(const fault of ['before','append-before','aft
       assert.equal(meta.id,'reserved-photo-id');
       assert.deepEqual(meta.parents,['test-photos']);
       assert.equal(meta.appProperties.sakefolioApp,mode?'sakefolio-security-test-20261019-v1':'sakefolio-react-v1');
-      files.set(meta.id,{...meta,mimeType:'image/png',trashed:false});uploads++;
+      files.set(meta.id,{...meta,mimeType:'image/png',ownedByMe:true,shared:false,trashed:false});uploads++;
       if(fault==='upload-lost'&&!failed){failed=true;throw new TypeError('Controlled committed upload response loss');}
       return new Response(JSON.stringify({id:meta.id}));
     }
@@ -126,3 +127,31 @@ for(const mode of [false,true])for(const fault of ['before','append-before','aft
   assert.equal(files.get(rows[1][16]).appProperties.reviewId,record.id);
 });
 
+test('China record editing updates exactly one matching row and rejects stale writes',async()=>{
+ const before=makeRecord(),revised={...before,notes:'修正済み'};
+ const row=normal.serializeChinaRow(before),table=[[...CHINA_HEADERS],[...row]];
+ let updates=0;
+ globalThis.fetch=async(input,init={})=>{
+  const url=new URL(input);
+  if(url.hostname!=='sheets.googleapis.com')throw Error('Only Sheets values should be touched without a photo');
+  if(init.method==='PUT'){
+   assert.match(decodeURIComponent(url.pathname),/ChinaDrinks.*A2:Q2/);
+   table[1]=JSON.parse(init.body).values[0];updates++;return new Response(JSON.stringify({updatedCells:17}));
+  }
+  return new Response(JSON.stringify({values:table}),{headers:{'Content-Type':'application/json'}});
+ };
+ await normal.updateChinaCloud('fake-token',storage,before,revised,null);
+ assert.equal(table[1][14],'修正済み');assert.equal(updates,1);
+ await assert.rejects(normal.updateChinaCloud('fake-token',storage,before,{...before,notes:'old conflicting'},null),/他の端末/);
+ assert.equal(updates,1);
+});
+
+test('China edit abort during revision read starts no mutation',async()=>{
+ const before=makeRecord(),controller=new AbortController();let reads=0;
+ globalThis.fetch=async(_url,init={})=>{
+   assert.notEqual(init.method,'PUT');reads++;controller.abort();
+   return new Response(JSON.stringify({values:[[...CHINA_HEADERS],normal.serializeChinaRow(before)]}));
+ };
+ await assert.rejects(normal.updateChinaCloud('fake',storage,before,{...before,notes:'must not write'},null,controller.signal),{name:'AbortError'});
+ assert.equal(reads,1);
+});

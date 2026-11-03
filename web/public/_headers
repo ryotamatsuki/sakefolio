@@ -5,3 +5,12 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: microphone=(), geolocation=(), camera=(self), payment=()
   Strict-Transport-Security: max-age=31536000
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  X-Robots-Tag: noindex, nofollow, noarchive
+
+/
+  Cache-Control: no-store
+/index.html
+  Cache-Control: no-store
+/build-manifest.json
+  Cache-Control: no-store

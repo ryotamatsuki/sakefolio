@@ -13,6 +13,8 @@ const emptyComponent=moduleUrl('export default function Component(){return null;
 let saved=[],failSave=true,finishSave;
 const services={
   listInternationalRecords:async()=>[],buildBackup:async()=>new Blob(),restoreBackup:async()=>({added:0,duplicates:0}),saveInternationalRecord:async()=>{},
+  replaceInternationalRecord:async()=>{},trashLocalInternationalRecord:async()=>{},restoreLocalInternationalRecord:async()=>{},listTrashedInternationalRecords:async()=>[],updateChinaCloud:async()=>{},
+  listTrash:async()=>[],moveToTrash:async()=>{},restoreFromTrash:async()=>{},
   loadChinaCloud:async()=>[],getPhotoBlob:async()=>new Blob(),
   saveChinaCloud:async(_token,_storage,record,photo,signal)=>{
     saved.push({record,photo,signal});record.photoId||='reserved-photo-id';
@@ -23,12 +25,13 @@ const services={
 // Transpile the real component; replace only external I/O, not its state handlers.
 const serviceKey='__sakefolioChinaComponentTestServices';
 globalThis[serviceKey]=services;
-const servicesUrl=moduleUrl(`const s=globalThis.${serviceKey}; export const {listInternationalRecords,buildBackup,restoreBackup,saveInternationalRecord,loadChinaCloud,getPhotoBlob,saveChinaCloud}=s;`);
+const servicesUrl=moduleUrl(`const s=globalThis.${serviceKey}; export const {listInternationalRecords,buildBackup,restoreBackup,saveInternationalRecord,loadChinaCloud,getPhotoBlob,saveChinaCloud,updateChinaCloud,replaceInternationalRecord,trashLocalInternationalRecord,restoreLocalInternationalRecord,listTrashedInternationalRecords,listTrash,moveToTrash,restoreFromTrash}=s;`);
 const icons=moduleUrl('export const ArrowRight=()=>null,BookOpen=()=>null,Camera=()=>null,Download=()=>null,ExternalLink=()=>null,Info=()=>null,MapPin=()=>null,Search=()=>null,ShieldCheck=()=>null,Upload=()=>null,Wine=()=>null,X=()=>null;');
 let source=readFileSync(new URL('./InternationalDrinks.tsx',import.meta.url),'utf8').replaceAll('import.meta.env.BASE_URL',"'/'");
 for(const [name,url] of Object.entries({
   react:pathToFileURL(require.resolve('react')).href,
   'lucide-react':icons,'./internationalLocal':servicesUrl,'./google':servicesUrl,'./internationalCloud':servicesUrl,
+  './trash':servicesUrl,'./recordArchive':new URL('./recordArchive.ts',import.meta.url).href,'./internationalInput':new URL('./internationalInput.ts',import.meta.url).href,
   './InternationalProducerMap':emptyComponent,'./InternationalInsights':emptyComponent,
   ...Object.fromEntries(['internationalCatalog','internationalMaster','internationalOsm','internationalSensory','requestGate'].map(n=>['./'+n,new URL('./'+n+'.ts',import.meta.url).href]))
 }))source=source.replaceAll("from '"+name+"'","from '"+url+"'");
