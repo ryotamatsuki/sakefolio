@@ -50,6 +50,7 @@ test('cloud Trash hides and restores without touching original drink rows or pho
    await moveToTrash('test',storage,'japan','review-a');
    assert.equal((await listTrash('test',storage)).length,1);
    await restoreFromTrash('test',storage,'japan','review-a');
+   await restoreFromTrash('test',storage,'japan','review-a');
    assert.deepEqual(await listTrash('test',storage),[]);
    assert.equal(calls.filter(c=>c.method==='POST'&&c.path.includes('append')).length,1);
    assert.equal(calls.some(c=>c.path.includes('Reviews')||c.path.includes('Photos')),false);

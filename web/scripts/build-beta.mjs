@@ -10,6 +10,8 @@ if(!/^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.pages\.dev$/.test(origin))
   throw Error('Set VITE_BETA_ORIGIN to the final dedicated https://PROJECT.pages.dev origin (no path).');
 if(!/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(client))
   throw Error('Set the public Google web OAuth client ID. Do not supply a client secret.');
+if(execFileSync('git',['status','--porcelain','--','.'],{cwd:root,encoding:'utf8'}).trim())
+  throw Error('Refusing to stamp a dirty source tree as a reviewed commit. Commit source changes first.');
 const commit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
 // Do not accidentally deploy the isolated real-account audit storage namespace.
 execFileSync('npm',['run','build'],{cwd:root,stdio:'inherit',env:{...process.env,

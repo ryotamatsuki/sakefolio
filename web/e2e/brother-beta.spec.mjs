@@ -45,6 +45,16 @@ async function fixture(page,{loseReviewResponse=false}={}){
   if(u.pathname==='/drive/v3/files/generateIds')return reply({ids:['photo-'+account+'-'+(++state.reserved)]});
   if(u.pathname==='/upload/drive/v3/files'){
    const bytes=req.postDataBuffer(),boundary=req.headers()['content-type'].split('boundary=')[1];
+   expect(boundary).toBeTruthy();
+   if(!bytes){
+    // Playwright WebKit cannot expose Blob request bodies to route handlers.
+    // Supply a protocol fixture, not a claim about live uploaded Safari bytes.
+    const id='photo-'+account+'-'+state.reserved;
+    const reviewId=state.tables.Bottles.at(-1)[0].replace(/-bottle$/,'');
+    state.photos.set(id,{id,parents:['photos-'+account],mimeType:'image/png',ownedByMe:true,shared:false,bytes:PNG,
+      appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo',reviewId}});
+    return reply({id});
+   }
    const first=bytes.indexOf('\r\n\r\n'),second=bytes.indexOf('\r\n--'+boundary,first+4);
    const meta=JSON.parse(bytes.subarray(first+4,second).toString());
    const mediaStart=bytes.indexOf('\r\n\r\n',second+4)+4;
@@ -118,4 +128,14 @@ test('lost save response and reload reuse the same journal ID, then A/B/A stay s
  await expect(page.getByRole('heading',{name:'UXTEST-A-only',exact:true})).toHaveCount(0);expect(states.B.tables.Reviews).toHaveLength(1);
  await disconnect(page);await page.evaluate(()=>{window.__testAccount='A';});await connect(page);
  await expect(page.getByRole('heading',{name:'UXTEST-A-only',exact:true})).toBeVisible();
+});
+
+test('anonymous catalogue search selects a Japanese sake without Google access',async({page})=>{
+ const states=await fixture(page);
+ await page.getByRole('button',{name:'銘柄を探す',exact:true}).first().click();
+ await page.getByLabel('銘柄・酒蔵を検索').fill('石鎚');
+ const brand=page.locator('.brand-tile').filter({hasText:'石鎚'}).first();
+ await expect(brand).toBeVisible();await brand.click();
+ await expect(page.getByPlaceholder('例：石鎚')).toHaveValue('石鎚');
+ expect(states.A.tables.Reviews).toHaveLength(1);expect(states.B.tables.Reviews).toHaveLength(1);
 });

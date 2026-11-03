@@ -14,7 +14,11 @@ let fault='',first=true,release,entered,calls=[],rows=new Map(),files=new Map();
 const services={GOOGLE_CLIENT_ID:'fake-client',SECURITY_TEST_MODE:false,
   requestGoogleAccess:async()=>'fake-only',getDriveAccount:async()=>({emailAddress:'qa@example.invalid'}),ensureStorage:async()=>storage,
   loadManualBrands:async()=>[],loadRecords:async()=>[...rows.values()],getPhotoBlob:async()=>new Blob(),inspectStorage:async()=>'',
-  revokeAccess:async()=>({successful:true}),updateReview:async()=>{},
+  revokeAccess:async()=>({successful:true}),updateReview:async(_token,_storage,original,changed,_photo,attempt,signal)=>{
+    calls.push({attempt,signal});rows.set(original.reviewId,{...changed,reviewId:original.reviewId});
+    if(fault==='edit-logout'){entered();await new Promise(resolve=>{release=resolve;});}
+    return {...changed,reviewId:original.reviewId};
+  },
   saveRecord:async(_token,_storage,entry,_brands,photo,attempt,signal)=>{
     calls.push({attempt,signal});attempt.photoFileId||='fake-photo';
     if(first&&fault==='before'){first=false;throw Error('Controlled network failure');}
@@ -83,4 +87,26 @@ test('P0-B3 Japanese UI logout/reconnect ignores a late committed save completio
     assert.equal(text(tree),before,'old completion must not overwrite the reconnected UI');
     assert.equal(rows.size,1);assert.equal(files.size,1);
   }finally{await act(async()=>tree.unmount());}
+});
+
+test('Japanese edit logout/reconnect retains the original edit identity and ignores stale completion',async()=>{
+ let tree,pending;await act(async()=>{tree=create(React.createElement(App));});
+ try{
+  await connect(tree);await fill(tree);
+  await act(async()=>{await tree.root.findByType('form').props.onSubmit({preventDefault(){}});});
+  const id=[...rows.keys()][0];
+  await act(async()=>button(tree,'編集').props.onClick());
+  await act(async()=>tree.root.findByType('textarea').props.onChange({target:{value:'合成編集'}}));
+  fault='edit-logout';const reached=new Promise(resolve=>{entered=resolve;});
+  await act(async()=>{pending=tree.root.findByType('form').props.onSubmit({preventDefault(){}});});await reached;
+  await act(async()=>tree.root.findByProps({className:'account-button'}).props.onClick());
+  await act(async()=>button(tree,'接続を解除').props.onClick());
+  assert.equal(calls.at(-1).signal.aborted,true);
+  await connect(tree);const before=text(tree);
+  await act(async()=>{release();await pending;});assert.equal(text(tree),before);
+  assert.match(text(tree),/日本酒の記録を編集する/);
+  fault='';await act(async()=>{await tree.root.findByType('form').props.onSubmit({preventDefault(){}});});
+  assert.equal(rows.size,1);assert.equal([...rows.keys()][0],id);
+  assert.equal(rows.get(id).notes,'合成編集');assert.match(text(tree),/既存の記録を更新しました/);
+ }finally{await act(async()=>tree.unmount());}
 });

@@ -34,6 +34,7 @@ for(const [mode,folder,marker] of [
    if((init.method||'GET')==='GET') {
     const query=url.searchParams.get('q')||'';
     assert.match(query,new RegExp(marker));
+    assert.ok(query.includes("'me' in owners"),'shared folders of another owner are never selected');
     assert.doesNotMatch(query,new RegExp(mode?'sakefolio-react-v1':'sakefolio-security-test-20261019-v1'));
     requests.push({method:'GET'});
     return new Response(JSON.stringify({files:[]}),{status:200});

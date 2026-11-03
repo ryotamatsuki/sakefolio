@@ -526,3 +526,12 @@ test('Japanese edit abort during revision read starts no photo or row write',asy
   {reviewId:original.reviewId},controller.signal),{name:'AbortError'});
  assert.equal(reads,1);assert.equal(state.writes.length,count);
 });
+
+test('photo lookup rejects shared files and files not owned by this account before media access',async()=>{
+ for(const extra of [{ownedByMe:false,shared:false},{ownedByMe:true,shared:true},{shared:false}]){
+  let calls=0;globalThis.fetch=async()=>{calls++;return json({id:'photo-id',mimeType:'image/png',parents:['test-photos'],
+   appProperties:{sakefolioApp:'sakefolio-react-v1',sakefolioKind:'photo'},...extra});};
+  await assert.rejects(google.getPhotoBlob('fake','photo-id','test-photos'),/管理する写真/);
+  assert.equal(calls,1);
+ }
+});
